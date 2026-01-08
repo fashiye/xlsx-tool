@@ -16,7 +16,7 @@ from core.diff_highlighter import DiffHighlighter
 from core.string_comparator import StringComparator
 
 # 配置日志记录
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.FileHandler("app.log"),
@@ -491,6 +491,12 @@ class ComparisonTool(QMainWindow):
         try:
             self.statusBar().showMessage("比较中...")
             
+            # 调试：检查file1_df和file2_df的类型和内容
+            logger.debug(f"file1_df类型: {type(self.file1_df)}, file1_df: {self.file1_df}")
+            logger.debug(f"file2_df类型: {type(self.file2_df)}, file2_df: {self.file2_df}")
+            logger.debug(f"file1_df形状: {self.file1_df.shape if hasattr(self.file1_df, 'shape') else '无shape属性'}")
+            logger.debug(f"file2_df形状: {self.file2_df.shape if hasattr(self.file2_df, 'shape') else '无shape属性'}")
+            
             if not self.file1_df or not self.file2_df:
                 QMessageBox.warning(self, "警告", "请先选择两个文件进行比较")
                 self.statusBar().showMessage("就绪")
@@ -512,7 +518,7 @@ class ComparisonTool(QMainWindow):
                     self.comparator.add_rule(rule)
                 
                 # 验证所有规则
-                passed_rules, failed_rules = self.comparator.rule_engine.validate_with_dataframes(self.file1_df, self.file2_df)
+                passed_rules, failed_rules = self.comparator.validate_with_dataframes(self.file1_df, self.file2_df)
                 
                 # 生成规则比较结果
                 result_text = "规则比较结果：\n"

@@ -1,5 +1,10 @@
 import pandas as pd
+import logging
 from core.rule_engine import RuleEngine
+
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # 创建测试数据框
 df1 = pd.DataFrame({
@@ -154,6 +159,63 @@ def test_float_comparison():
     assert engine.validate_rule("A1 = B1", df_float) is True  # 在容差范围内
     assert engine.validate_rule("A3 = B3", df_float) is True  # 在容差范围内
 
+def test_dataframe_boolean_error_handling():
+    """测试DataFrame布尔比较错误处理"""
+    engine = RuleEngine()
+    
+    # 创建测试数据框
+    df = pd.DataFrame({
+        'A': [1, 2, 3, 4],
+        'B': [5, 6, 7, 8],
+        'C': [9, 10, 11, 12]
+    })
+    
+    # 测试基本比较，确保不会抛出DataFrame布尔错误
+    try:
+        result = engine.validate_rule("A1 < B1", df)
+        assert isinstance(result, bool), f"结果应该是布尔类型，实际是: {type(result)}"
+        assert result is True
+        logger.info("基本比较测试通过")
+    except Exception as e:
+        assert False, f"基本比较抛出异常: {e}"
+    
+    # 测试跨文件比较
+    df2 = pd.DataFrame({
+        'A': [1, 2, 5, 4],
+        'B': [5, 7, 7, 8],
+        'C': [9, 10, 12, 12]
+    })
+    
+    try:
+        result = engine.validate_rule("FILE1:A1 = FILE2:A1", df, df2)
+        assert isinstance(result, bool), f"跨文件比较结果应该是布尔类型，实际是: {type(result)}"
+        assert result is True
+        logger.info("跨文件比较测试通过")
+    except Exception as e:
+        assert False, f"跨文件比较抛出异常: {e}"
+    
+    # 测试复杂表达式比较
+    try:
+        result = engine.validate_rule("A1 + B1 < C1", df)
+        assert isinstance(result, bool), f"复杂表达式比较结果应该是布尔类型，实际是: {type(result)}"
+        assert result is True
+        logger.info("复杂表达式比较测试通过")
+    except Exception as e:
+        assert False, f"复杂表达式比较抛出异常: {e}"
+    
+    # 测试边缘情况 - 空值比较
+    df_empty = pd.DataFrame({
+        'A': [None, 2, 3],
+        'B': [4, None, 6]
+    })
+    
+    try:
+        result = engine.validate_rule("A1 = B1", df_empty)
+        assert isinstance(result, bool), f"空值比较结果应该是布尔类型，实际是: {type(result)}"
+        logger.info("空值比较测试通过")
+    except Exception as e:
+        assert False, f"空值比较抛出异常: {e}"
+
 if __name__ == "__main__":
     # 运行所有测试
     test_parse_rule()
@@ -163,4 +225,5 @@ if __name__ == "__main__":
     test_range_references()
     test_invalid_rules()
     test_float_comparison()
+    test_dataframe_boolean_error_handling()
     print("所有测试通过！")

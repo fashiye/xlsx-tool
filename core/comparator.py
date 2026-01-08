@@ -39,16 +39,26 @@ class ExcelComparator:
             alias: 工作簿别名，默认为文件路径
         
         将工作簿的所有工作表加载为DataFrame，并存储在工作簿字典中
+        
+        返回:
+            dict: 工作表名称到DataFrame的映射
+            
+        异常:
+            Exception: 如果文件加载失败，会捕获并重新抛出异常
         """
         alias = alias or filepath
         logger.info(f"加载工作簿: {filepath}，别名为: {alias}")
-        sheets = load_workbook_all_sheets(filepath)
-        self.workbooks[alias] = {
-            'path': filepath,
-            'sheets': sheets
-        }
-        logger.info(f"工作簿加载成功，包含 {len(sheets)} 个工作表: {list(sheets.keys())}")
-        return sheets
+        try:
+            sheets = load_workbook_all_sheets(filepath)
+            self.workbooks[alias] = {
+                'path': filepath,
+                'sheets': sheets
+            }
+            logger.info(f"工作簿加载成功，包含 {len(sheets)} 个工作表: {list(sheets.keys())}")
+            return sheets
+        except Exception as e:
+            logger.error(f"加载工作簿失败: {filepath}，错误: {str(e)}")
+            raise Exception(f"无法加载工作簿 {filepath}: {str(e)}") from e
     def list_sheets(self, alias):
         """
         获取指定工作簿的所有工作表名称列表
@@ -248,12 +258,32 @@ class ExcelComparator:
         return validate_formula(cells_dict, formula, expected_value, tolerance=tol)
 
     def export_results(self, result_df, output_path, format='excel'):
-        if format == 'excel':
-            result_df.to_excel(output_path, index=False)
-        elif format == 'csv':
-            result_df.to_csv(output_path, index=False)
-        else:
-            raise ValueError("不支持的导出格式")
+        """
+        导出比较结果到文件
+        
+        参数:
+            result_df: 比较结果DataFrame
+            output_path: 输出文件路径
+            format: 导出格式，支持'excel'和'csv'，默认为'excel'
+            
+        返回:
+            bool: 导出是否成功
+        """
+        logger.info(f"开始导出结果到: {output_path}，格式: {format}")
+        try:
+            if format == 'excel':
+                result_df.to_excel(output_path, index=False)
+                logger.info(f"Excel文件导出成功: {output_path}")
+            elif format == 'csv':
+                result_df.to_csv(output_path, index=False)
+                logger.info(f"CSV文件导出成功: {output_path}")
+            else:
+                logger.error(f"不支持的导出格式: {format}")
+                raise ValueError(f"不支持的导出格式: {format}")
+            return True
+        except Exception as e:
+            logger.error(f"导出结果失败: {str(e)}")
+            return False
 
     def add_rule(self, rule):
         """
@@ -279,6 +309,20 @@ class ExcelComparator:
         """
         return self.rule_engine.rules
     
+    def validate_with_dataframes(self, df1, df2):
+        """
+        使用两个数据帧验证规则（支持跨文件比较）
+        
+        参数:
+            df1: 文件1的数据帧
+            df2: 文件2的数据帧
+            
+        返回:
+            tuple: (passed_rules, failed_rules)
+        """
+        logger.info(f"使用数据帧验证规则，df1形状: {df1.shape}, df2形状: {df2.shape}")
+        return self.rule_engine.validate_with_dataframes(df1, df2)
+    
     def compare_with_rules(self, alias1, sheet_name1, alias2=None, sheet_name2=None):
         """
         基于自定义规则比较数据
@@ -299,38 +343,55 @@ class ExcelComparator:
         if alias2 and sheet_name2:
             logger.info(f"文件2: {alias2}，工作表: {sheet_name2}")
         
-        # 获取数据
-        df1 = self.get_sheet_dataframe(alias1, sheet_name1)
-        df2 = self.get_sheet_dataframe(alias2, sheet_name2) if alias2 and sheet_name2 else None
-        
-        # 验证所有规则
-        passed_rules, failed_rules = self.rule_engine.validate_all_rules(df1, df2)
-        
-        # 计算结果
-        total_rules = len(passed_rules) + len(failed_rules)
-        passed_rate = len(passed_rules) / total_rules if total_rules > 0 else 1.0
-        
-        # 生成结果摘要
-        result_summary = {
-            'total_rules': total_rules,
-            'passed_rules': len(passed_rules),
-            'failed_rules': len(failed_rules),
-            'passed_rate': passed_rate
-        }
-        
-        # 生成详细比较结果
-        comparison_results = {
-            'passed': passed_rules,
-            'failed': failed_rules
-        }
-        
-        logger.info(f"规则比较完成: 总规则数={total_rules}，通过={len(passed_rules)}，失败={len(failed_rules)}，通过率={passed_rate:.2f}")
-        if passed_rules:
-            logger.info(f"通过的规则: {passed_rules}")
-        if failed_rules:
-            logger.info(f"失败的规则: {failed_rules}")
-        
-        return result_summary, comparison_results
+        try:
+            # 获取数据
+            df1 = self.get_sheet_dataframe(alias1, sheet_name1)
+            df2 = self.get_sheet_dataframe(alias2, sheet_name2) if alias2 and sheet_name2 else None
+            
+            # 验证所有规则
+            passed_rules, failed_rules = self.rule_engine.validate_all_rules(df1, df2)
+            
+            # 计算结果
+            total_rules = len(passed_rules) + len(failed_rules)
+            passed_rate = len(passed_rules) / total_rules if total_rules > 0 else 1.0
+            
+            # 生成结果摘要
+            result_summary = {
+                'total_rules': total_rules,
+                'passed_rules': len(passed_rules),
+                'failed_rules': len(failed_rules),
+                'passed_rate': passed_rate
+            }
+            
+            # 生成详细比较结果
+            comparison_results = {
+                'passed': passed_rules,
+                'failed': failed_rules
+            }
+            
+            logger.info(f"规则比较完成: 总规则数={total_rules}，通过={len(passed_rules)}，失败={len(failed_rules)}，通过率={passed_rate:.2f}")
+            if passed_rules:
+                logger.info(f"通过的规则: {passed_rules}")
+            if failed_rules:
+                logger.info(f"失败的规则: {failed_rules}")
+            
+            return result_summary, comparison_results
+        except Exception as e:
+            logger.error(f"规则比较失败: {str(e)}")
+            # 返回包含错误信息的结果
+            result_summary = {
+                'total_rules': 0,
+                'passed_rules': 0,
+                'failed_rules': 0,
+                'passed_rate': 0.0,
+                'error': str(e)
+            }
+            comparison_results = {
+                'passed': [],
+                'failed': [],
+                'error': str(e)
+            }
+            return result_summary, comparison_results
     
     def compare_sheets_with_rules(self, alias1, sheet_name1, alias2, sheet_name2, cell_range=None):
         """
@@ -355,52 +416,94 @@ class ExcelComparator:
         if cell_range:
             logger.info(f"比较范围: {cell_range}")
         
-        # 获取两个工作表的数据
-        df1 = self.get_sheet_dataframe(alias1, sheet_name1)
-        df2 = self.get_sheet_dataframe(alias2, sheet_name2)
-        
-        # 如果指定了范围，选择指定范围的数据
-        if cell_range:
-            df1 = self.select_cells(alias1, sheet_name1, cell_range)
-            df2 = self.select_cells(alias2, sheet_name2, cell_range)
-            logger.info(f"范围选择后，文件1数据形状: {df1.shape}，文件2数据形状: {df2.shape}")
-        
-        # 验证所有规则
-        result_summary, comparison_results = self.compare_with_rules(alias1, sheet_name1, alias2, sheet_name2)
-        
-        # 创建组合数据框用于显示
-        max_rows = max(df1.shape[0], df2.shape[0])
-        max_cols = max(df1.shape[1], df2.shape[1])
-        
-        # 确保列名一致
-        col_names = []
-        for i in range(max_cols):
-            if i < df1.shape[1]:
-                col_names.append(f"文件1_{str(df1.columns[i])}")
-            elif i < df2.shape[1]:
-                col_names.append(f"文件2_{str(df2.columns[i])}")
+        try:
+            # 获取两个工作表的数据
+            df1 = self.get_sheet_dataframe(alias1, sheet_name1)
+            df2 = self.get_sheet_dataframe(alias2, sheet_name2)
+            
+            # 如果指定了范围，选择指定范围的数据
+            if cell_range:
+                df1 = self.select_cells(alias1, sheet_name1, cell_range)
+                df2 = self.select_cells(alias2, sheet_name2, cell_range)
+                logger.info(f"范围选择后，文件1数据形状: {df1.shape}，文件2数据形状: {df2.shape}")
+                
+                # 直接使用范围选择后的数据进行规则验证
+                passed_rules, failed_rules = self.rule_engine.validate_all_rules(df1, df2)
+                
+                # 计算结果
+                total_rules = len(passed_rules) + len(failed_rules)
+                passed_rate = len(passed_rules) / total_rules if total_rules > 0 else 1.0
+                
+                # 生成结果摘要
+                result_summary = {
+                    'total_rules': total_rules,
+                    'passed_rules': len(passed_rules),
+                    'failed_rules': len(failed_rules),
+                    'passed_rate': passed_rate
+                }
+                
+                # 生成详细比较结果
+                comparison_results = {
+                    'passed': passed_rules,
+                    'failed': failed_rules
+                }
+                
+                logger.info(f"规则比较完成: 总规则数={total_rules}，通过={len(passed_rules)}，失败={len(failed_rules)}，通过率={passed_rate:.2f}")
             else:
-                col_names.append(f"COL_{i}")
-        
-        # 构建组合数据框
-        combined_data = []
-        for r in range(max_rows):
-            row_data = []
-            # 添加文件1的数据
-            for c in range(df1.shape[1]):
-                if r < df1.shape[0]:
-                    row_data.append(df1.iloc[r, c])
+                # 验证所有规则
+                result_summary, comparison_results = self.compare_with_rules(alias1, sheet_name1, alias2, sheet_name2)
+            
+            # 创建组合数据框用于显示
+            max_rows = max(df1.shape[0], df2.shape[0])
+            max_cols = max(df1.shape[1], df2.shape[1])
+            
+            # 确保列名一致
+            col_names = []
+            for i in range(max_cols):
+                if i < df1.shape[1]:
+                    col_names.append(f"文件1_{str(df1.columns[i])}")
+                elif i < df2.shape[1]:
+                    col_names.append(f"文件2_{str(df2.columns[i])}")
                 else:
-                    row_data.append(None)
-            # 添加文件2的数据
-            for c in range(df2.shape[1]):
-                if r < df2.shape[0]:
-                    row_data.append(df2.iloc[r, c])
-                else:
-                    row_data.append(None)
-            combined_data.append(row_data)
-        
-        combined_df = pd.DataFrame(combined_data, columns=col_names)
-        logger.info(f"组合数据框创建完成，形状: {combined_df.shape}")
-        
-        return result_summary, comparison_results, combined_df
+                    col_names.append(f"COL_{i}")
+            
+            # 构建组合数据框
+            combined_data = []
+            for r in range(max_rows):
+                row_data = []
+                # 添加文件1的数据
+                for c in range(df1.shape[1]):
+                    if r < df1.shape[0]:
+                        row_data.append(df1.iloc[r, c])
+                    else:
+                        row_data.append(None)
+                # 添加文件2的数据
+                for c in range(df2.shape[1]):
+                    if r < df2.shape[0]:
+                        row_data.append(df2.iloc[r, c])
+                    else:
+                        row_data.append(None)
+                combined_data.append(row_data)
+            
+            combined_df = pd.DataFrame(combined_data, columns=col_names)
+            logger.info(f"组合数据框创建完成，形状: {combined_df.shape}")
+            
+            return result_summary, comparison_results, combined_df
+        except Exception as e:
+            logger.error(f"工作表比较失败: {str(e)}")
+            # 返回包含错误信息的结果
+            result_summary = {
+                'total_rules': 0,
+                'passed_rules': 0,
+                'failed_rules': 0,
+                'passed_rate': 0.0,
+                'error': str(e)
+            }
+            comparison_results = {
+                'passed': [],
+                'failed': [],
+                'error': str(e)
+            }
+            # 返回空的组合数据框
+            combined_df = pd.DataFrame()
+            return result_summary, comparison_results, combined_df

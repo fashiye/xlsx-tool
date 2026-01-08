@@ -5,50 +5,82 @@
 import difflib
 import re
 import textdistance
+import logging
+
+# 配置日志记录
+logging.basicConfig(level=logging.INFO, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler("app.log"),
+                        logging.StreamHandler()
+                    ])
+logger = logging.getLogger(__name__)
 
 class StringComparator:
     def exact_match(self, s1, s2, ignore_case=False):
+        logger.info(f"执行精确字符串匹配: '{s1}' vs '{s2}', 忽略大小写: {ignore_case}")
         if ignore_case:
-            return str(s1).lower() == str(s2).lower()
-        return str(s1) == str(s2)
+            result = str(s1).lower() == str(s2).lower()
+        else:
+            result = str(s1) == str(s2)
+        logger.info(f"精确匹配结果: {result}")
+        return result
 
     def fuzzy_match(self, s1, s2, method='levenshtein', threshold=0.8):
+        logger.info(f"执行模糊字符串匹配: '{s1}' vs '{s2}', 方法: {method}, 阈值: {threshold}")
         s1 = str(s1) or ""
         s2 = str(s2) or ""
-        if method in ('levenshtein', 'lev'):
-            if textdistance:
-                d = textdistance.levenshtein.normalized_similarity(s1, s2)
+        try:
+            if method in ('levenshtein', 'lev'):
+                if textdistance:
+                    d = textdistance.levenshtein.normalized_similarity(s1, s2)
+                else:
+                    # fallback: ratio from difflib
+                    d = difflib.SequenceMatcher(None, s1, s2).ratio()
+            elif method in ('jaro', 'jaro_winkler', 'jw'):
+                if textdistance:
+                    d = textdistance.jaro_winkler.normalized_similarity(s1, s2)
+                else:
+                    d = difflib.SequenceMatcher(None, s1, s2).ratio()
             else:
-                # fallback: ratio from difflib
                 d = difflib.SequenceMatcher(None, s1, s2).ratio()
-        elif method in ('jaro', 'jaro_winkler', 'jw'):
-            if textdistance:
-                d = textdistance.jaro_winkler.normalized_similarity(s1, s2)
-            else:
-                d = difflib.SequenceMatcher(None, s1, s2).ratio()
-        else:
-            d = difflib.SequenceMatcher(None, s1, s2).ratio()
-        return (d >= threshold, d)
+            result = (d >= threshold, d)
+            logger.info(f"模糊匹配结果: 匹配 = {result[0]}, 相似度 = {result[1]}")
+            return result
+        except Exception as e:
+            logger.error(f"模糊匹配失败: {str(e)}")
+            return (False, 0.0)
 
     def regex_match(self, s1, s2, pattern):
+        logger.info(f"执行正则表达式匹配: '{s1}' vs '{s2}', 模式: {pattern}")
         try:
             m1 = re.search(pattern, s1)
             m2 = re.search(pattern, s2)
-            return bool(m1 and m2)
-        except re.error:
+            result = bool(m1 and m2)
+            logger.info(f"正则匹配结果: {result}")
+            return result
+        except re.error as e:
+            logger.error(f"正则表达式错误: {str(e)}")
             return False
 
     def text_diff(self, s1, s2, mode='line'):
-        if mode == 'line':
-            lines1 = str(s1).splitlines()
-            lines2 = str(s2).splitlines()
-            diff = list(difflib.unified_diff(lines1, lines2, lineterm=''))
-            has_diff = any(not (line.startswith('---') or line.startswith('+++') or line.startswith('@@')) and (line.startswith('+') or line.startswith('-')) for line in diff)
-            return diff, has_diff
-        else:
-            diff = list(difflib.ndiff(str(s1), str(s2)))
-            has_diff = any(ch[0] in ('+', '-') for ch in diff)
-            return diff, has_diff
+        logger.info(f"执行文本差异分析: '{s1[:50]}...' vs '{s2[:50]}...', 模式: {mode}")
+        try:
+            if mode == 'line':
+                lines1 = str(s1).splitlines()
+                lines2 = str(s2).splitlines()
+                diff = list(difflib.unified_diff(lines1, lines2, lineterm=''))
+                has_diff = any(not (line.startswith('---') or line.startswith('+++') or line.startswith('@@')) and (line.startswith('+') or line.startswith('-')) for line in diff)
+                result = (diff, has_diff)
+            else:
+                diff = list(difflib.ndiff(str(s1), str(s2)))
+                has_diff = any(ch[0] in ('+', '-') for ch in diff)
+                result = (diff, has_diff)
+            logger.info(f"文本差异分析结果: 存在差异 = {result[1]}")
+            return result
+        except Exception as e:
+            logger.error(f"文本差异分析失败: {str(e)}")
+            return ([], True)
 
     def structured_match(self, s1, s2, format_type='csv', delimiter=','):
         if format_type == 'csv':
