@@ -17,3 +17,8 @@ display:
 export:
   default_format: "excel"
   include_timestamp: true
+
+debug:
+  enabled: true
+  log_level: "DEBUG"
+  log_file: "app.log"

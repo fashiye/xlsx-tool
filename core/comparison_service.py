@@ -15,7 +15,7 @@ import logging
 from core.comparator import ExcelComparator
 
 # 配置日志记录
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.FileHandler("app.log"),
@@ -141,14 +141,19 @@ class ComparisonService:
                 - result_map: 结果状态映射
         """
         logger.info("开始执行比较操作")
+        logger.debug(f"run_comparison参数 - use_rules: {use_rules}, options: {options}")
         
-        if not self.file1_df or not self.file2_df:
+        if self.file1_df is None or self.file2_df is None or self.file1_df.empty or self.file2_df.empty:
             logger.warning("比较失败：未选择两个文件")
             raise Exception("请先选择两个文件进行比较")
         
         result_text = ""
         
         # 根据是否使用规则执行不同的比较
+        logger.debug(f"use_rules类型: {type(use_rules)}, use_rules值: {use_rules}")
+        logger.debug(f"self.rules类型: {type(self.rules)}, self.rules值: {self.rules}")
+        logger.debug(f"self.rules长度: {len(self.rules) if hasattr(self.rules, '__len__') else '不可测'}")
+        
         if use_rules and self.rules:
             logger.info(f"使用{len(self.rules)}条用户定义规则进行比较")
             # 清除比较器中已有的规则
@@ -179,8 +184,15 @@ class ComparisonService:
                     result_text += f"  ✗ {rule}\n"
                 result_text += "\n"
             
-            # 规则比较没有结果数据框和映射
-            return result_text, None, None
+            # 为规则比较结果创建DataFrame
+            rules_data = []
+            for rule in passed_rules:
+                rules_data.append({'规则': rule, '状态': '通过'})
+            for rule in failed_rules:
+                rules_data.append({'规则': rule, '状态': '失败'})
+            
+            result_df = pd.DataFrame(rules_data)
+            return result_text, result_df, None
         else:
             logger.info("执行直接比较")
             # 默认比较选项
@@ -190,7 +202,35 @@ class ComparisonService:
             }
             
             # 执行直接比较
-            self.result_df, self.result_map = self.comparator.compare_direct(self.file1_df, self.file2_df, options)
+            logger.debug(f"直接比较参数 - file1_df: {self.file1_df.shape}, file2_df: {self.file2_df.shape}")
+            logger.debug(f"file1_df类型: {type(self.file1_df)}")
+            logger.debug(f"file2_df类型: {type(self.file2_df)}")
+            logger.debug(f"file1_df内容: {self.file1_df}")
+            logger.debug(f"file2_df内容: {self.file2_df}")
+            
+            # 调用compare_direct
+            try:
+                compare_result = self.comparator.compare_direct(self.file1_df, self.file2_df, options)
+                logger.debug(f"compare_direct返回类型: {type(compare_result)}")
+                logger.debug(f"compare_direct返回值: {compare_result}")
+                
+                # 解包返回值
+                if compare_result and len(compare_result) == 2:
+                    self.result_df, self.result_map = compare_result
+                    logger.debug(f"解包后 - result_df: {self.result_df is not None}, result_map: {self.result_map is not None}")
+                    if self.result_df is not None:
+                        logger.debug(f"result_df形状: {self.result_df.shape}, result_df类型: {type(self.result_df)}")
+                    if self.result_map is not None:
+                        logger.debug(f"result_map类型: {type(self.result_map)}, result_map长度: {len(self.result_map) if hasattr(self.result_map, '__len__') else '不可测'}")
+                else:
+                    logger.error(f"compare_direct返回值格式错误: {compare_result}")
+                    self.result_df = None
+                    self.result_map = None
+            except Exception as e:
+                logger.error(f"compare_direct调用失败: {str(e)}", exc_info=True)
+                logger.error(f"file1_df类型: {type(self.file1_df)}, file1_df形状: {self.file1_df.shape if hasattr(self.file1_df, 'shape') else '未知'}")
+                logger.error(f"file2_df类型: {type(self.file2_df)}, file2_df形状: {self.file2_df.shape if hasattr(self.file2_df, 'shape') else '未知'}")
+                raise Exception(f"比较失败: {str(e)}") from e
             
             # 格式化直接比较结果
             result_text = self._format_direct_comparison_result()
@@ -200,18 +240,29 @@ class ComparisonService:
     def _format_direct_comparison_result(self):
         """
         格式化直接比较结果
-        
+
         返回:
             str: 格式化的比较结果文本
         """
-        if not self.result_df or not self.result_map:
+        logger.debug(f"格式化直接比较结果 - result_df: {self.result_df is not None}, result_map: {self.result_map is not None}")
+        if self.result_df is None or self.result_df.empty or not self.result_map:
             return "无比较结果"
         
         # 计算差异统计
-        total_cells = len(self.result_map)
-        equal_cells = sum(1 for status in self.result_map.values() if status == 'equal')
-        diff_cells = total_cells - equal_cells
-        diff_rate = diff_cells / total_cells if total_cells > 0 else 0
+        try:
+            if not self.result_map:
+                total_cells = 0
+                equal_cells = 0
+                diff_cells = 0
+                diff_rate = 0.0
+            else:
+                total_cells = len(self.result_map)
+                equal_cells = sum(1 for status in self.result_map.values() if status == 'equal')
+                diff_cells = total_cells - equal_cells
+                diff_rate = diff_cells / total_cells if total_cells > 0 else 0
+        except Exception as e:
+            logger.error(f"计算差异统计时出错: {str(e)}")
+            raise
         
         # 收集差异位置
         diff_positions = []
@@ -268,7 +319,7 @@ class ComparisonService:
         返回:
             bool: 保存是否成功
         """
-        if not result_df:
+        if result_df is None or result_df.empty:
             logger.warning("没有可保存的结果")
             return False
         

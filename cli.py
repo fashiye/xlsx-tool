@@ -10,7 +10,7 @@ import sys
 from core.comparison_service import ComparisonService
 
 # 配置日志记录
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.FileHandler("app.log"),
@@ -23,10 +23,10 @@ def main():
     命令行接口主函数
     """
     parser = argparse.ArgumentParser(description='Excel数据对比工具')
-    parser.add_argument('--file1', '-f1', required=True, help='第一个Excel文件路径')
-    parser.add_argument('--file2', '-f2', required=True, help='第二个Excel文件路径')
-    parser.add_argument('--sheet1', '-s1', default=None, help='第一个文件的工作表名称（可选，默认使用第一个工作表）')
-    parser.add_argument('--sheet2', '-s2', default=None, help='第二个文件的工作表名称（可选，默认使用第一个工作表）')
+    parser.add_argument('--file1', '-f1', default='test_logging.xlsx', help='第一个Excel文件路径')
+    parser.add_argument('--file2', '-f2', default='test_logging.xlsx', help='第二个Excel文件路径')
+    parser.add_argument('--sheet1', '-s1', default='Sheet1', help='第一个文件的工作表名称（可选）')
+    parser.add_argument('--sheet2', '-s2', default='Sheet1', help='第二个文件的工作表名称（可选）')
     parser.add_argument('--rule', '-r', action='append', help='比较规则，可以多次使用（可选）')
     parser.add_argument('--output', '-o', default=None, help='结果输出文件路径（可选）')
     parser.add_argument('--tolerance', '-t', default='0', help='数值比较容差（可选）')
@@ -38,7 +38,9 @@ def main():
     print("Excel数据对比工具 - 命令行模式")
     print("=" * 60)
     
-    try:
+#    try:
+    if True:
+    
         # 创建比较服务实例
         service = ComparisonService()
         
@@ -69,7 +71,7 @@ def main():
         
         # 执行比较
         print("\n正在执行比较...")
-        use_rules = len(args.rule) > 0
+        use_rules = args.rule is not None and len(args.rule) > 0
         options = {
             'tolerance': args.tolerance,
             'ignore_case': args.ignore_case
@@ -97,10 +99,10 @@ def main():
         print("比较完成")
         print("=" * 60)
         
-    except Exception as e:
-        print(f"\n错误: {e}")
-        logger.error(f"比较失败: {str(e)}")
-        sys.exit(1)
+#    except Exception as e:
+ #       print(f"\n错误: {e}")
+  #      logger.error(f"比较失败: {str(e)}")
+   #     sys.exit(1)
 
 if __name__ == "__main__":
     main()

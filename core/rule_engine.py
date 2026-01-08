@@ -6,7 +6,7 @@ import pandas as pd
 import logging
 
 # 配置日志记录
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.FileHandler("app.log"),
@@ -217,80 +217,125 @@ class RuleEngine:
         返回:
             float: 表达式的值
         """
+        logger.debug(f"evaluate_expression - 输入表达式: {expr}")
+        logger.debug(f"evaluate_expression - df1类型: {type(df1)}, df1形状: {df1.shape}")
+        logger.debug(f"evaluate_expression - df2类型: {type(df2)}, df2形状: {df2.shape if df2 is not None else 'None'}")
+        
         rpn = self.parse_expression(expr)
+        logger.debug(f"evaluate_expression - 解析后的RPN表达式: {rpn}")
+        
         stack = []
         
         for token in rpn:
+            logger.debug(f"evaluate_expression - 处理标记: {token}, 类型: {type(token)}")
+            
             if isinstance(token, (int, float)):
                 # 数字直接入栈
+                logger.debug(f"evaluate_expression - 数字标记，直接入栈: {token}")
                 stack.append(token)
             elif token in self.operators:
                 # 操作符：弹出两个操作数，计算结果后入栈
                 if len(stack) < 2:
+                    logger.error(f"evaluate_expression - 操作符{token}需要两个操作数，但栈中只有{len(stack)}个元素")
                     raise ValueError("无效的表达式")
+                
                 b = stack.pop()
                 a = stack.pop()
+                logger.debug(f"evaluate_expression - 弹出操作数: a={a} (类型: {type(a)}), b={b} (类型: {type(b)})")
                 
                 # 确保操作数是标量值
                 if hasattr(a, 'shape'):
+                    logger.debug(f"evaluate_expression - 操作数a是DataFrame/Series类型，需要转换为标量")
                     if hasattr(a, 'iloc'):
                         a = a.iloc[0, 0] if a.shape[0] > 0 and a.shape[1] > 0 else 0.0
                     elif hasattr(a, 'item'):
                         a = a.item()
-                    else:
+                    elif hasattr(a, '__len__'):
                         a = float(a[0]) if len(a) > 0 else 0.0
+                    else:
+                        a = 0.0
+                    logger.debug(f"evaluate_expression - 转换后a={a} (类型: {type(a)})")
                 
                 if hasattr(b, 'shape'):
+                    logger.debug(f"evaluate_expression - 操作数b是DataFrame/Series类型，需要转换为标量")
                     if hasattr(b, 'iloc'):
                         b = b.iloc[0, 0] if b.shape[0] > 0 and b.shape[1] > 0 else 0.0
                     elif hasattr(b, 'item'):
                         b = b.item()
-                    else:
+                    elif hasattr(b, '__len__'):
                         b = float(b[0]) if len(b) > 0 else 0.0
+                    else:
+                        b = 0.0
+                    logger.debug(f"evaluate_expression - 转换后b={b} (类型: {type(b)})")
                 
-                result = self.operators[token][1](a, b)
+                # 执行运算
+                op_func = self.operators[token][1]
+                logger.debug(f"evaluate_expression - 执行运算: {a} {token} {b}")
+                result = op_func(a, b)
+                logger.debug(f"evaluate_expression - 运算结果: {result} (类型: {type(result)})")
                 
                 # 确保结果是标量值
                 if hasattr(result, 'shape'):
+                    logger.debug(f"evaluate_expression - 运算结果是DataFrame/Series类型，需要转换为标量")
                     if hasattr(result, 'iloc'):
                         result = result.iloc[0, 0] if result.shape[0] > 0 and result.shape[1] > 0 else 0.0
                     elif hasattr(result, 'item'):
                         result = result.item()
-                    else:
+                    elif hasattr(result, '__len__'):
                         result = float(result[0]) if len(result) > 0 else 0.0
+                    else:
+                        result = 0.0
+                    logger.debug(f"evaluate_expression - 转换后结果: {result} (类型: {type(result)})")
                 
                 stack.append(result)
             elif isinstance(token, str):
                 # 单元格引用：获取值
+                logger.debug(f"evaluate_expression - 单元格引用标记: {token}")
+                
                 if token.startswith('FILE1:'):
                     # FILE1前缀，使用df1
                     cell_ref = token[6:]
                     cell_value = self.get_cell_value(cell_ref, df1)
+                    logger.debug(f"evaluate_expression - FILE1单元格引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
                 elif token.startswith('FILE2:'):
                     # FILE2前缀，使用df2
                     if df2 is None:
+                        logger.error(f"evaluate_expression - 需要df2参数来处理FILE2:前缀的单元格引用")
                         raise ValueError("需要df2参数来处理FILE2:前缀的单元格引用")
                     cell_ref = token[6:]
                     cell_value = self.get_cell_value(cell_ref, df2)
+                    logger.debug(f"evaluate_expression - FILE2单元格引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
                 else:
                     # 默认使用df1
                     cell_value = self.get_cell_value(token, df1)
+                    logger.debug(f"evaluate_expression - 默认单元格引用: {token} = {cell_value} (类型: {type(cell_value)})")
+                
                 stack.append(cell_value)
             else:
+                logger.error(f"evaluate_expression - 无效的标记: {token} (类型: {type(token)})")
                 raise ValueError(f"无效的标记：{token}")
+            
+            logger.debug(f"evaluate_expression - 当前栈状态: {stack}")
         
         if len(stack) != 1:
+            logger.error(f"evaluate_expression - 表达式求值完成后栈中应有1个元素，但有{len(stack)}个: {stack}")
             raise ValueError("无效的表达式")
         
         # 确保最终结果是标量值
         final_result = stack[0]
+        logger.debug(f"evaluate_expression - 求值结果: {final_result} (类型: {type(final_result)})")
+        
         if hasattr(final_result, 'shape'):
+            logger.debug(f"evaluate_expression - 最终结果是DataFrame/Series类型，需要转换为标量")
             if hasattr(final_result, 'iloc'):
                 final_result = final_result.iloc[0, 0] if final_result.shape[0] > 0 and final_result.shape[1] > 0 else 0.0
             elif hasattr(final_result, 'item'):
                 final_result = final_result.item()
-            else:
+            elif hasattr(final_result, '__len__'):
                 final_result = float(final_result[0]) if len(final_result) > 0 else 0.0
+            else:
+                final_result = 0.0
+            logger.debug(f"evaluate_expression - 转换后最终结果: {final_result} (类型: {type(final_result)})")
         
         return final_result
     

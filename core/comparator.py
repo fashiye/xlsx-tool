@@ -10,7 +10,7 @@ import re
 import logging
 
 # 配置日志记录
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.FileHandler("app.log"),
@@ -182,13 +182,20 @@ class ExcelComparator:
             - 空值比较：两个空值视为相等
             - 不同类型比较：转换为字符串后比较
         """
+        logger.debug(f"compare_direct - 输入df1类型: {type(df1)}, df1形状: {df1.shape}")
+        logger.debug(f"compare_direct - 输入df2类型: {type(df2)}, df2形状: {df2.shape}")
+        logger.debug(f"compare_direct - df1内容:\n{df1}")
+        logger.debug(f"compare_direct - df2内容:\n{df2}")
+        
         options = options or {}
         tol = float(options.get('tolerance', 0))
         ignore_case = bool(options.get('ignore_case', False))
+        logger.debug(f"compare_direct - 比较选项: tolerance={tol}, ignore_case={ignore_case}")
 
         # 确定结果表的形状
         rows = max(df1.shape[0], df2.shape[0])
         cols = max(df1.shape[1], df2.shape[1])
+        logger.debug(f"compare_direct - 结果表形状: rows={rows}, cols={cols}")
 
         # 确保结果表有足够的列
         col_names = []
@@ -201,6 +208,7 @@ class ExcelComparator:
             else:
                 name = f"COL_{i}"
             col_names.append(name)
+        logger.debug(f"compare_direct - 列名: {col_names}")
 
         # 构建结果数据和映射
         result_vals = []
@@ -213,9 +221,13 @@ class ExcelComparator:
                 v1 = df1.iloc[r, c] if r < df1.shape[0] and c < df1.shape[1] else None
                 v2 = df2.iloc[r, c] if r < df2.shape[0] and c < df2.shape[1] else None
                 
+                logger.debug(f"compare_direct - 单元格({r},{c}) - v1: {v1}, 类型: {type(v1)}, v2: {v2}, 类型: {type(v2)}")
+                
                 # 处理空值情况
                 is_v1_na = pd.isna(v1)
                 is_v2_na = pd.isna(v2)
+                
+                logger.debug(f"compare_direct - 单元格({r},{c}) - is_v1_na: {is_v1_na}, is_v2_na: {is_v2_na}")
                 
                 # 默认状态和显示值
                 status = 'empty'
@@ -227,26 +239,35 @@ class ExcelComparator:
                     try:
                         # 数值比较
                         if isinstance(v1, (int, float)) and isinstance(v2, (int, float)):
+                            logger.debug(f"compare_direct - 单元格({r},{c}) - 数值比较")
                             diff = abs(v1 - v2)
                             status = 'equal' if diff <= tol else 'diff'
+                            logger.debug(f"compare_direct - 单元格({r},{c}) - 差值: {diff}, 容差: {tol}, 结果: {status}")
                         else:
                             # 转换为字符串比较
+                            logger.debug(f"compare_direct - 单元格({r},{c}) - 字符串比较")
                             s1 = str(v1) if not is_v1_na else ''
                             s2 = str(v2) if not is_v2_na else ''
+                            logger.debug(f"compare_direct - 单元格({r},{c}) - s1: {s1}, s2: {s2}")
                             
                             if ignore_case:
                                 s1 = s1.lower()
                                 s2 = s2.lower()
+                                logger.debug(f"compare_direct - 单元格({r},{c}) - 忽略大小写后: s1={s1}, s2={s2}")
                             
                             status = 'equal' if s1 == s2 else 'diff'
-                    except Exception:
+                            logger.debug(f"compare_direct - 单元格({r},{c}) - 比较结果: {status}")
+                    except Exception as e:
                         # 如果比较失败，标记为差异
+                        logger.error(f"compare_direct - 单元格({r},{c}) - 比较出错: {e}")
                         status = 'diff'
                 
                 row_vals.append(display)
                 result_map[(r, c)] = status
+                logger.debug(f"compare_direct - 单元格({r},{c}) - 最终状态: {status}")
             
             result_vals.append(row_vals)
+            logger.debug(f"compare_direct - 行{r}处理完成")
 
         # 创建结果DataFrame
         result_df = pd.DataFrame(result_vals, columns=col_names)
