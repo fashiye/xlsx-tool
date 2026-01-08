@@ -680,20 +680,33 @@ class RuleEngine:
             df2: 第二个数据帧（可选，用于跨文件比较）
             
         返回:
-            tuple: (passed_rules, failed_rules)
+            tuple: (passed_rules, failed_rules, all_failed_cells, all_passed_cells)
                 - passed_rules: 通过的规则列表
                 - failed_rules: 失败的规则列表
+                - all_failed_cells: 所有失败的单元格列表，格式为[(rule, row_idx, col_idx), ...]
+                - all_passed_cells: 所有通过的单元格列表，格式为[(rule, row_idx, col_idx), ...]
         """
         passed = []
         failed = []
+        all_failed_cells = []
+        all_passed_cells = []
         
         for rule in self.rules:
-            if self.validate_rule(rule, df1, df2):
+            is_valid, failed_cells, passed_cells = self.validate_rule(rule, df1, df2)
+            if is_valid:
                 passed.append(rule)
             else:
                 failed.append(rule)
+            
+            # 收集失败的单元格
+            for row_idx, col_idx in failed_cells:
+                all_failed_cells.append((rule, row_idx, col_idx))
+            
+            # 收集通过的单元格
+            for row_idx, col_idx in passed_cells:
+                all_passed_cells.append((rule, row_idx, col_idx))
         
-        return passed, failed
+        return passed, failed, all_failed_cells, all_passed_cells
     
     def validate_with_dataframes(self, df1, df2):
         """
@@ -704,6 +717,6 @@ class RuleEngine:
             df2: 文件2的数据帧
             
         返回:
-            tuple: (passed_rules, failed_rules)
+            tuple: (passed_rules, failed_rules, all_failed_cells, all_passed_cells)
         """
         return self.validate_all_rules(df1, df2)
