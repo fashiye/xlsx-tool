@@ -436,24 +436,28 @@ class RuleEngine:
     def validate_rule(self, rule, df1, df2=None):
         """
         验证单条规则，支持单DataFrame或双DataFrame比较
+        支持单元格引用（如A1）和列引用（如A）
 
         参数:
-            rule: 规则字符串，如 "A1 + B1 = C1" 或 "FILE1:A1 = FILE2:A1"
+            rule: 规则字符串，如 "A1 + B1 = C1" 或 "FILE1:A = FILE2:A"
             df1: 第一个数据帧（默认数据帧）
             df2: 第二个数据帧（可选，用于跨文件比较）
 
         返回:
-            bool: 规则是否通过验证
+            tuple: (is_valid, failed_cells, passed_cells)
+                - is_valid: 布尔值，表示规则是否通过验证
+                - failed_cells: 失败的单元格列表（如[(row1, col1), (row2, col2)]）
+                - passed_cells: 通过的单元格列表
         """
         logger.info(f"验证规则: {rule}")
         try:
             # 确保df1和df2是DataFrame类型
             if not hasattr(df1, 'iloc'):
                 logger.error(f"参数df1不是DataFrame类型: {type(df1)}")
-                return False
+                return False, [], []
             if df2 is not None and not hasattr(df2, 'iloc'):
                 logger.error(f"参数df2不是DataFrame类型: {type(df2)}")
-                return False
+                return False, [], []
                 
             left_expr, op, right_expr = self.parse_rule(rule)
             logger.info(f"解析后的规则组件: 左表达式={left_expr}, 操作符={op}, 右表达式={right_expr}")
@@ -464,127 +468,208 @@ class RuleEngine:
             logger.info(f"表达式求值结果类型 - 左值类型: {type(left_value)}, 右值类型: {type(right_value)}")
             logger.info(f"表达式求值结果 - 左: {left_expr} = {left_value}, 右: {right_expr} = {right_value}")
             
-            # 确保操作数是标量值，避免DataFrame布尔上下文问题
-            def ensure_scalar(value):
-                """确保值是标量"""
-                logger.debug(f"ensure_scalar输入: {value}, 类型: {type(value)}")
+            # 检查是否是列规则（左或右值是Series类型）
+            is_column_rule = isinstance(left_value, pd.Series) or isinstance(right_value, pd.Series)
+            
+            failed_cells = []
+            passed_cells = []
+            
+            if is_column_rule:
+                # 处理列规则
+                logger.info(f"处理列规则: {rule}")
                 
-                # 已经是标量值
-                if isinstance(value, (bool, int, float)):
-                    logger.debug(f"已经是标量值: {value}")
-                    return value
+                # 确保两边都是Series类型
+                if not isinstance(left_value, pd.Series):
+                    # 将标量转换为与右值相同长度的Series
+                    left_value = pd.Series([left_value] * len(right_value), index=right_value.index)
+                elif not isinstance(right_value, pd.Series):
+                    # 将标量转换为与左值相同长度的Series
+                    right_value = pd.Series([right_value] * len(left_value), index=left_value.index)
                 
-                # 检查是否是DataFrame或Series
-                elif hasattr(value, 'shape'):
-                    logger.warning(f"发现非标量值: {value}, 类型: {type(value)}, 形状: {getattr(value, 'shape', '未知')}")
+                # 确保两个Series长度相同
+                if len(left_value) != len(right_value):
+                    logger.error(f"列长度不匹配: 左={len(left_value)}, 右={len(right_value)}")
+                    return False, [], []
+                
+                # 执行逐行比较
+                for i in range(len(left_value)):
+                    lv = left_value.iloc[i]
+                    rv = right_value.iloc[i]
                     
-                    # DataFrame类型
-                    if hasattr(value, 'iloc'):
-                        logger.debug("处理DataFrame类型")
-                        if value.shape[0] > 0 and value.shape[1] > 0:
-                            scalar_value = value.iloc[0, 0]  # 提取首个单元格值
-                            logger.debug(f"从DataFrame提取值: {scalar_value}, 类型: {type(scalar_value)}")
-                            # 递归调用确保最终返回标量
-                            return ensure_scalar(scalar_value)
+                    try:
+                        # 执行比较
+                        if op == '=':
+                            row_result = abs(float(lv) - float(rv)) < 1e-6  # 考虑浮点误差
+                        elif op == '!=':
+                            row_result = abs(float(lv) - float(rv)) >= 1e-6
+                        elif op == '<':
+                            row_result = float(lv) < float(rv)
+                        elif op == '<=':
+                            row_result = float(lv) <= float(rv)
+                        elif op == '>':
+                            row_result = float(lv) > float(rv)
+                        elif op == '>=':
+                            row_result = float(lv) >= float(rv)
                         else:
-                            logger.debug("空DataFrame，返回0.0")
-                            return 0.0
+                            logger.error(f"未知的比较操作符: {op}")
+                            row_result = False
+                        
+                        if row_result:
+                            passed_cells.append((i, None))  # None表示列引用，没有具体列索引
+                        else:
+                            failed_cells.append((i, None))  # None表示列引用，没有具体列索引
+                    except Exception as e:
+                        logger.error(f"行比较错误 (行{i+1}): {e}")
+                        failed_cells.append((i, None))
+                
+                # 检查是否所有行都通过
+                all_passed = len(failed_cells) == 0
+                logger.info(f"列规则验证结果: {rule} -> {all_passed}, 失败行数: {len(failed_cells)}, 通过行数: {len(passed_cells)}")
+                return all_passed, failed_cells, passed_cells
+            else:
+                # 处理单元格规则（保持原有逻辑）
+                logger.info(f"处理单元格规则: {rule}")
+                
+                # 确保操作数是标量值
+                def ensure_scalar(value):
+                    """确保值是标量"""
+                    logger.debug(f"ensure_scalar输入: {value}, 类型: {type(value)}")
                     
-                    # Series或numpy数组类型
-                    elif hasattr(value, 'item'):
-                        logger.debug("处理Series或numpy数组类型")
-                        try:
-                            scalar_value = value.item()
-                            logger.debug(f"从Series/数组提取值: {scalar_value}, 类型: {type(scalar_value)}")
-                            return ensure_scalar(scalar_value)
-                        except (ValueError, TypeError):
-                            logger.warning("无法使用item()提取值")
-                            if hasattr(value, '__len__') and len(value) > 0:
-                                scalar_value = float(value[0])
-                                logger.debug(f"从Series/数组提取第一个元素: {scalar_value}")
+                    # 已经是标量值
+                    if isinstance(value, (bool, int, float)):
+                        logger.debug(f"已经是标量值: {value}")
+                        return value
+                    
+                    # 检查是否是DataFrame或Series
+                    elif hasattr(value, 'shape'):
+                        logger.warning(f"发现非标量值: {value}, 类型: {type(value)}, 形状: {getattr(value, 'shape', '未知')}")
+                        
+                        # DataFrame类型
+                        if hasattr(value, 'iloc'):
+                            logger.debug("处理DataFrame类型")
+                            if value.shape[0] > 0 and value.shape[1] > 0:
+                                scalar_value = value.iloc[0, 0]  # 提取首个单元格值
+                                logger.debug(f"从DataFrame提取值: {scalar_value}, 类型: {type(scalar_value)}")
+                                # 递归调用确保最终返回标量
                                 return ensure_scalar(scalar_value)
                             else:
-                                logger.debug("空Series/数组，返回0.0")
+                                logger.debug("空DataFrame，返回0.0")
                                 return 0.0
-                    
-                    # 其他具有len()的类型
-                    elif hasattr(value, '__len__') and len(value) > 0:
-                        logger.debug("处理具有len()的类型")
-                        try:
-                            scalar_value = float(value[0])
-                            logger.debug(f"提取第一个元素: {scalar_value}")
-                            return ensure_scalar(scalar_value)
-                        except (ValueError, TypeError):
-                            logger.warning("无法转换为浮点数，返回0.0")
+                        
+                        # Series或numpy数组类型
+                        elif hasattr(value, 'item'):
+                            logger.debug("处理Series或numpy数组类型")
+                            try:
+                                scalar_value = value.item()
+                                logger.debug(f"从Series/数组提取值: {scalar_value}, 类型: {type(scalar_value)}")
+                                return ensure_scalar(scalar_value)
+                            except (ValueError, TypeError):
+                                logger.warning("无法使用item()提取值")
+                                if hasattr(value, '__len__') and len(value) > 0:
+                                    scalar_value = float(value[0])
+                                    logger.debug(f"从Series/数组提取第一个元素: {scalar_value}")
+                                    return ensure_scalar(scalar_value)
+                                else:
+                                    logger.debug("空Series/数组，返回0.0")
+                                    return 0.0
+                        
+                        # 其他具有len()的类型
+                        elif hasattr(value, '__len__') and len(value) > 0:
+                            logger.debug("处理具有len()的类型")
+                            try:
+                                scalar_value = float(value[0])
+                                logger.debug(f"提取第一个元素: {scalar_value}")
+                                return ensure_scalar(scalar_value)
+                            except (ValueError, TypeError):
+                                logger.warning("无法转换为浮点数，返回0.0")
+                                return 0.0
+                        
+                        # 其他情况
+                        else:
+                            logger.debug("其他情况，返回0.0")
                             return 0.0
                     
-                    # 其他情况
+                    # 尝试转换为数值
                     else:
-                        logger.debug("其他情况，返回0.0")
-                        return 0.0
+                        logger.debug("尝试转换为数值")
+                        try:
+                            scalar_value = float(value)
+                            logger.debug(f"转换为浮点数: {scalar_value}")
+                            return scalar_value
+                        except (ValueError, TypeError):
+                            logger.warning(f"无法转换为浮点数: {value}, 返回0.0")
+                            return 0.0
                 
-                # 尝试转换为数值
-                else:
-                    logger.debug("尝试转换为数值")
-                    try:
-                        scalar_value = float(value)
-                        logger.debug(f"转换为浮点数: {scalar_value}")
-                        return scalar_value
-                    except (ValueError, TypeError):
-                        logger.warning(f"无法转换为浮点数: {value}, 返回0.0")
-                        return 0.0
-            
-            # 转换值为标量
-            left_value = ensure_scalar(left_value)
-            right_value = ensure_scalar(right_value)
-            
-            logger.info(f"转换后的值 - 左: {left_value} (类型: {type(left_value)}), 右: {right_value} (类型: {type(right_value)})")
-            
-            # 执行比较操作
-            try:
-                # 再次确保值是标量，双重保险
-                left_scalar = ensure_scalar(left_value)
-                right_scalar = ensure_scalar(right_value)
+                # 转换值为标量
+                left_value = ensure_scalar(left_value)
+                right_value = ensure_scalar(right_value)
                 
-                logger.info(f"比较前的最终标量值 - 左: {left_scalar} (类型: {type(left_scalar)}), 右: {right_scalar} (类型: {type(right_scalar)})")
+                logger.info(f"转换后的值 - 左: {left_value} (类型: {type(left_value)}), 右: {right_value} (类型: {type(right_value)})")
                 
-                # 确保值是可比较的类型
-                if not isinstance(left_scalar, (int, float)) or not isinstance(right_scalar, (int, float)):
-                    logger.error(f"比较值不是数值类型: 左={left_scalar} (类型: {type(left_scalar)}), 右={right_scalar} (类型: {type(right_scalar)})")
-                    return False
-                
-                # 执行比较
-                if op == '=':
-                    result = abs(float(left_scalar) - float(right_scalar)) < 1e-6  # 考虑浮点误差
-                elif op == '!=':
-                    result = abs(float(left_scalar) - float(right_scalar)) >= 1e-6
-                elif op == '<':
-                    result = float(left_scalar) < float(right_scalar)
-                elif op == '<=':
-                    result = float(left_scalar) <= float(right_scalar)
-                elif op == '>':
-                    result = float(left_scalar) > float(right_scalar)
-                elif op == '>=':
-                    result = float(left_scalar) >= float(right_scalar)
-                else:
-                    logger.error(f"未知的比较操作符: {op}")
-                    return False
-                
-                logger.info(f"比较结果: {result}, 类型: {type(result)}")
-                
-                # 确保最终结果是标量布尔值
-                final_result = bool(result)
-                logger.info(f"规则验证结果: {rule} -> {final_result}")
-                return final_result
-            except Exception as e:
-                # 如果比较操作出错，返回False并记录详细错误
-                logger.error(f"比较操作错误：{e}", exc_info=True)
-                logger.error(f"比较失败的详细信息 - 左值: {left_value} (类型: {type(left_value)}), 右值: {right_value} (类型: {type(right_value)}), 操作符: {op}")
-                return False
+                # 执行比较操作
+                try:
+                    # 再次确保值是标量，双重保险
+                    left_scalar = ensure_scalar(left_value)
+                    right_scalar = ensure_scalar(right_value)
+                    
+                    logger.info(f"比较前的最终标量值 - 左: {left_scalar} (类型: {type(left_scalar)}), 右: {right_scalar} (类型: {type(right_scalar)})")
+                    
+                    # 确保值是可比较的类型
+                    if not isinstance(left_scalar, (int, float)) or not isinstance(right_scalar, (int, float)):
+                        logger.error(f"比较值不是数值类型: 左={left_scalar} (类型: {type(left_scalar)}), 右={right_scalar} (类型: {type(right_scalar)})")
+                        return False, [], []
+                    
+                    # 执行比较
+                    if op == '=':
+                        result = abs(float(left_scalar) - float(right_scalar)) < 1e-6  # 考虑浮点误差
+                    elif op == '!=':
+                        result = abs(float(left_scalar) - float(right_scalar)) >= 1e-6
+                    elif op == '<':
+                        result = float(left_scalar) < float(right_scalar)
+                    elif op == '<=':
+                        result = float(left_scalar) <= float(right_scalar)
+                    elif op == '>':
+                        result = float(left_scalar) > float(right_scalar)
+                    elif op == '>=':
+                        result = float(left_scalar) >= float(right_scalar)
+                    else:
+                        logger.error(f"未知的比较操作符: {op}")
+                        return False, [], []
+                    
+                    logger.info(f"比较结果: {result}, 类型: {type(result)}")
+                    
+                    # 确保最终结果是标量布尔值
+                    final_result = bool(result)
+                    
+                    # 解析单元格引用以获取行列信息
+                    cell_match = re.search(r'([A-Za-z]+)(\d+)', rule)
+                    if cell_match:
+                        col_letters = cell_match.group(1)
+                        row_str = cell_match.group(2)
+                        
+                        # 转换为索引
+                        col_idx = 0
+                        for ch in col_letters.upper():
+                            col_idx = col_idx * 26 + (ord(ch) - ord('A') + 1)
+                        col_idx -= 1
+                        row_idx = int(row_str) - 1
+                        
+                        if final_result:
+                            passed_cells.append((row_idx, col_idx))
+                        else:
+                            failed_cells.append((row_idx, col_idx))
+                    
+                    logger.info(f"规则验证结果: {rule} -> {final_result}")
+                    return final_result, failed_cells, passed_cells
+                except Exception as e:
+                    # 如果比较操作出错，返回False并记录详细错误
+                    logger.error(f"比较操作错误：{e}", exc_info=True)
+                    logger.error(f"比较失败的详细信息 - 左值: {left_value} (类型: {type(left_value)}), 右值: {right_value} (类型: {type(right_value)}), 操作符: {op}")
+                    return False, [], []
         except Exception as e:
             # 解析或计算错误时返回False
             logger.error(f"规则验证错误：{e}", exc_info=True)
-            return False
+            return False, [], []
     
     def validate_all_rules(self, df1, df2=None):
         """
