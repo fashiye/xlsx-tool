@@ -6,7 +6,7 @@ import pandas as pd
 import logging
 
 # 配置日志记录
-logging.basicConfig(level=logging.INFO, 
+logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
                         logging.FileHandler("app.log"),
@@ -106,44 +106,35 @@ class RuleEngine:
                     # 不是负数，可能是二元减号
                     tokens.append('-')
             
-            # 解析FILE1:或FILE2:前缀的单元格引用
+            # 解析FILE1:或FILE2:前缀的单元格或列引用
             elif i + 6 <= n and expr[i:i+6] == 'FILE1:':
                 j = i + 6
-                # 提取单元格引用
+                # 提取单元格或列引用
                 while j < n and (expr[j].isalpha() or expr[j].isdigit() or expr[j] == ':'):
                     j += 1
                 token = expr[i:j]
-                # 检查是否是范围引用
+                # 检查是否是复杂范围引用（超过一个冒号）
                 if token.count(':') > 1:
-                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格引用）")
-                # 进一步检查是否是范围引用（例如FILE1:A1:B2）
-                if ':' in token[6:]:
-                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格引用）")
+                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格或列引用）")
                 tokens.append(token)  # 包括FILE1:前缀
                 i = j
             elif i + 6 <= n and expr[i:i+6] == 'FILE2:':
                 j = i + 6
-                # 提取单元格引用
+                # 提取单元格或列引用
                 while j < n and (expr[j].isalpha() or expr[j].isdigit() or expr[j] == ':'):
                     j += 1
                 token = expr[i:j]
-                # 检查是否是范围引用
+                # 检查是否是复杂范围引用（超过一个冒号）
                 if token.count(':') > 1:
-                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格引用）")
-                # 进一步检查是否是范围引用（例如FILE2:A1:B2）
-                if ':' in token[6:]:
-                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格引用）")
+                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格或列引用）")
                 tokens.append(token)  # 包括FILE2:前缀
                 i = j
-            # 解析普通单元格引用（如A1）
+            # 解析普通单元格或列引用（如A1或A）
             elif expr[i].isalpha():
                 j = i
                 while j < n and (expr[j].isalpha() or expr[j].isdigit()):
                     j += 1
                 token = expr[i:j]
-                # 检查是否是范围引用
-                if ':' in token:
-                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格引用）")
                 tokens.append(token)
                 i = j
             # 解析数字
@@ -217,154 +208,230 @@ class RuleEngine:
         返回:
             float: 表达式的值
         """
+        logger.debug(f"evaluate_expression - 输入表达式: {expr}")
+        logger.debug(f"evaluate_expression - df1类型: {type(df1)}, df1形状: {df1.shape}")
+        logger.debug(f"evaluate_expression - df2类型: {type(df2)}, df2形状: {df2.shape if df2 is not None else 'None'}")
+        
         rpn = self.parse_expression(expr)
+        logger.debug(f"evaluate_expression - 解析后的RPN表达式: {rpn}")
+        
         stack = []
         
         for token in rpn:
+            logger.debug(f"evaluate_expression - 处理标记: {token}, 类型: {type(token)}")
+            
             if isinstance(token, (int, float)):
                 # 数字直接入栈
+                logger.debug(f"evaluate_expression - 数字标记，直接入栈: {token}")
                 stack.append(token)
             elif token in self.operators:
                 # 操作符：弹出两个操作数，计算结果后入栈
                 if len(stack) < 2:
+                    logger.error(f"evaluate_expression - 操作符{token}需要两个操作数，但栈中只有{len(stack)}个元素")
                     raise ValueError("无效的表达式")
+                
                 b = stack.pop()
                 a = stack.pop()
+                logger.debug(f"evaluate_expression - 弹出操作数: a={a} (类型: {type(a)}), b={b} (类型: {type(b)})")
                 
                 # 确保操作数是标量值
                 if hasattr(a, 'shape'):
+                    logger.debug(f"evaluate_expression - 操作数a是DataFrame/Series类型，需要转换为标量")
                     if hasattr(a, 'iloc'):
                         a = a.iloc[0, 0] if a.shape[0] > 0 and a.shape[1] > 0 else 0.0
                     elif hasattr(a, 'item'):
                         a = a.item()
-                    else:
+                    elif hasattr(a, '__len__'):
                         a = float(a[0]) if len(a) > 0 else 0.0
+                    else:
+                        a = 0.0
+                    logger.debug(f"evaluate_expression - 转换后a={a} (类型: {type(a)})")
                 
                 if hasattr(b, 'shape'):
+                    logger.debug(f"evaluate_expression - 操作数b是DataFrame/Series类型，需要转换为标量")
                     if hasattr(b, 'iloc'):
                         b = b.iloc[0, 0] if b.shape[0] > 0 and b.shape[1] > 0 else 0.0
                     elif hasattr(b, 'item'):
                         b = b.item()
-                    else:
+                    elif hasattr(b, '__len__'):
                         b = float(b[0]) if len(b) > 0 else 0.0
+                    else:
+                        b = 0.0
+                    logger.debug(f"evaluate_expression - 转换后b={b} (类型: {type(b)})")
                 
-                result = self.operators[token][1](a, b)
+                # 执行运算
+                op_func = self.operators[token][1]
+                logger.debug(f"evaluate_expression - 执行运算: {a} {token} {b}")
+                result = op_func(a, b)
+                logger.debug(f"evaluate_expression - 运算结果: {result} (类型: {type(result)})")
                 
                 # 确保结果是标量值
                 if hasattr(result, 'shape'):
+                    logger.debug(f"evaluate_expression - 运算结果是DataFrame/Series类型，需要转换为标量")
                     if hasattr(result, 'iloc'):
                         result = result.iloc[0, 0] if result.shape[0] > 0 and result.shape[1] > 0 else 0.0
                     elif hasattr(result, 'item'):
                         result = result.item()
-                    else:
+                    elif hasattr(result, '__len__'):
                         result = float(result[0]) if len(result) > 0 else 0.0
+                    else:
+                        result = 0.0
+                    logger.debug(f"evaluate_expression - 转换后结果: {result} (类型: {type(result)})")
                 
                 stack.append(result)
             elif isinstance(token, str):
                 # 单元格引用：获取值
+                logger.debug(f"evaluate_expression - 单元格引用标记: {token}")
+                
                 if token.startswith('FILE1:'):
                     # FILE1前缀，使用df1
                     cell_ref = token[6:]
                     cell_value = self.get_cell_value(cell_ref, df1)
+                    logger.debug(f"evaluate_expression - FILE1单元格引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
                 elif token.startswith('FILE2:'):
                     # FILE2前缀，使用df2
                     if df2 is None:
+                        logger.error(f"evaluate_expression - 需要df2参数来处理FILE2:前缀的单元格引用")
                         raise ValueError("需要df2参数来处理FILE2:前缀的单元格引用")
                     cell_ref = token[6:]
                     cell_value = self.get_cell_value(cell_ref, df2)
+                    logger.debug(f"evaluate_expression - FILE2单元格引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
                 else:
                     # 默认使用df1
                     cell_value = self.get_cell_value(token, df1)
+                    logger.debug(f"evaluate_expression - 默认单元格引用: {token} = {cell_value} (类型: {type(cell_value)})")
+                
                 stack.append(cell_value)
             else:
+                logger.error(f"evaluate_expression - 无效的标记: {token} (类型: {type(token)})")
                 raise ValueError(f"无效的标记：{token}")
+            
+            logger.debug(f"evaluate_expression - 当前栈状态: {stack}")
         
         if len(stack) != 1:
+            logger.error(f"evaluate_expression - 表达式求值完成后栈中应有1个元素，但有{len(stack)}个: {stack}")
             raise ValueError("无效的表达式")
         
         # 确保最终结果是标量值
         final_result = stack[0]
+        logger.debug(f"evaluate_expression - 求值结果: {final_result} (类型: {type(final_result)})")
+        
         if hasattr(final_result, 'shape'):
+            logger.debug(f"evaluate_expression - 最终结果是DataFrame/Series类型，需要转换为标量")
             if hasattr(final_result, 'iloc'):
                 final_result = final_result.iloc[0, 0] if final_result.shape[0] > 0 and final_result.shape[1] > 0 else 0.0
             elif hasattr(final_result, 'item'):
                 final_result = final_result.item()
-            else:
+            elif hasattr(final_result, '__len__'):
                 final_result = float(final_result[0]) if len(final_result) > 0 else 0.0
+            else:
+                final_result = 0.0
+            logger.debug(f"evaluate_expression - 转换后最终结果: {final_result} (类型: {type(final_result)})")
         
         return final_result
     
     def get_cell_value(self, cell_ref, df):
         """
-        从数据帧中获取单元格值
+        从数据帧中获取单元格值或列数据
         
         参数:
-            cell_ref: 单元格引用，如 "A1"（不支持范围）
+            cell_ref: 单元格引用（如 "A1"）或列引用（如 "A"）
             df: 数据帧
             
         返回:
-            float: 单元格的值（确保返回标量）
+            float 或 pd.Series: 单元格的值（标量）或列数据（Series）
         """
-        # 解析列字母和行号
-        match = re.match(r'^([A-Za-z]+)(\d+)$', cell_ref)
-        if not match:
-            raise ValueError(f"无效的单元格引用：{cell_ref}（不支持范围引用）")
-        
-        col_letters = match.group(1)
-        row_str = match.group(2)
-        
-        # 转换列字母为索引（A=0, B=1, ..., AA=26）
-        col_idx = 0
-        for ch in col_letters.upper():
-            col_idx = col_idx * 26 + (ord(ch) - ord('A') + 1)
-        col_idx -= 1
-        
-        # 转换行号为索引（1-based -> 0-based）
-        row_idx = int(row_str) - 1
-        
-        # 检查范围
-        if col_idx < 0 or col_idx >= df.shape[1]:
-            raise ValueError(f"列索引超出范围：{col_letters}")
-        if row_idx < 0 or row_idx >= df.shape[0]:
-            raise ValueError(f"行索引超出范围：{row_str}")
-        
-        # 获取值
-        value = df.iloc[row_idx, col_idx]
-        
-        logger.debug(f"获取单元格值 - 引用: {cell_ref}, 行: {row_idx}, 列: {col_idx}, 原始值: {value}, 类型: {type(value)}")
-        
-        # 确保值是标量
-        if hasattr(value, 'shape'):
-            # 如果是DataFrame或Series，提取第一个元素
-            logger.warning(f"单元格值不是标量: {value}, 类型: {type(value)}, 形状: {getattr(value, 'shape', '未知')}")
-            if hasattr(value, 'iloc'):
-                # DataFrame
-                if value.shape[0] > 0 and value.shape[1] > 0:
-                    value = value.iloc[0, 0]
+        # 解析单元格引用（如A1）
+        cell_match = re.match(r'^([A-Za-z]+)(\d+)$', cell_ref)
+        if cell_match:
+            # 单个单元格引用
+            col_letters = cell_match.group(1)
+            row_str = cell_match.group(2)
+            
+            # 转换列字母为索引（A=0, B=1, ..., AA=26）
+            col_idx = 0
+            for ch in col_letters.upper():
+                col_idx = col_idx * 26 + (ord(ch) - ord('A') + 1)
+            col_idx -= 1
+            
+            # 转换行号为索引（1-based -> 0-based）
+            row_idx = int(row_str) - 1
+            
+            # 检查范围
+            if col_idx < 0 or col_idx >= df.shape[1]:
+                raise ValueError(f"列索引超出范围：{col_letters}")
+            if row_idx < 0 or row_idx >= df.shape[0]:
+                raise ValueError(f"行索引超出范围：{row_str}")
+            
+            # 获取值
+            value = df.iloc[row_idx, col_idx]
+            
+            logger.debug(f"获取单元格值 - 引用: {cell_ref}, 行: {row_idx}, 列: {col_idx}, 原始值: {value}, 类型: {type(value)}")
+            
+            # 确保值是标量
+            if hasattr(value, 'shape'):
+                # 如果是DataFrame或Series，提取第一个元素
+                logger.warning(f"单元格值不是标量: {value}, 类型: {type(value)}, 形状: {getattr(value, 'shape', '未知')}")
+                if hasattr(value, 'iloc'):
+                    # DataFrame
+                    if value.shape[0] > 0 and value.shape[1] > 0:
+                        value = value.iloc[0, 0]
+                    else:
+                        value = 0.0
+                elif hasattr(value, 'item'):
+                    # Series或numpy数组
+                    try:
+                        value = value.item()
+                    except (ValueError, TypeError):
+                        value = 0.0
+                elif hasattr(value, '__len__') and len(value) > 0:
+                    # 其他可迭代对象
+                    value = value[0]
                 else:
                     value = 0.0
-            elif hasattr(value, 'item'):
-                # Series或numpy数组
-                try:
-                    value = value.item()
-                except (ValueError, TypeError):
-                    value = 0.0
-            elif hasattr(value, '__len__') and len(value) > 0:
-                # 其他可迭代对象
-                value = value[0]
-            else:
-                value = 0.0
-        
-        # 转换为数值
-        if pd.isna(value):
-            return 0.0
-        elif isinstance(value, (int, float)):
-            return float(value)
-        else:
-            try:
-                return float(value)
-            except ValueError:
+            
+            # 转换为数值
+            if pd.isna(value):
                 return 0.0
+            elif isinstance(value, (int, float)):
+                return float(value)
+            else:
+                try:
+                    return float(value)
+                except ValueError:
+                    return 0.0
+        
+        # 解析列引用（如A）
+        col_match = re.match(r'^([A-Za-z]+)$', cell_ref)
+        if col_match:
+            # 整列引用
+            col_letters = col_match.group(1)
+            
+            # 转换列字母为索引（A=0, B=1, ..., AA=26）
+            col_idx = 0
+            for ch in col_letters.upper():
+                col_idx = col_idx * 26 + (ord(ch) - ord('A') + 1)
+            col_idx -= 1
+            
+            # 检查范围
+            if col_idx < 0 or col_idx >= df.shape[1]:
+                raise ValueError(f"列索引超出范围：{col_letters}")
+            
+            # 获取整列数据
+            col_data = df.iloc[:, col_idx]
+            
+            logger.debug(f"获取列数据 - 引用: {cell_ref}, 列: {col_idx}, 数据类型: {type(col_data)}")
+            
+            # 转换为数值类型，无法转换的设为NaN
+            col_data = pd.to_numeric(col_data, errors='coerce')
+            
+            # 填充NaN为0
+            col_data = col_data.fillna(0)
+            
+            return col_data
+        
+        # 既不是单元格引用也不是列引用
+        raise ValueError(f"无效的引用格式：{cell_ref}")
     
     def validate_rule(self, rule, df1, df2=None):
         """

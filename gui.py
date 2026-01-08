@@ -2,9 +2,7 @@
 Excel数据对比工具 - GUI界面
 根据设计要求重新设计的中文界面
 """
-import os
-import html
-import difflib
+
 import logging
 from PyQt5.QtCore import Qt, QAbstractTableModel, QVariant
 from PyQt5.QtGui import QBrush, QColor, QFont
@@ -13,7 +11,6 @@ import pandas as pd
 
 from core.comparison_service import ComparisonService
 from core.diff_highlighter import DiffHighlighter
-from core.string_comparator import StringComparator
 
 # 配置日志记录
 logging.basicConfig(level=logging.DEBUG,
@@ -605,7 +602,7 @@ class ComparisonTool(QMainWindow):
         """
         保存比较结果到文件
         """
-        if not self.result_df:
+        if self.result_df is None or self.result_df.empty:
             QMessageBox.warning(self, "警告", "没有可保存的结果")
             return
         
