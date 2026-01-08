@@ -11,7 +11,7 @@ from PyQt5.QtGui import QBrush, QColor, QFont
 from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QLineEdit, QTableView, QCheckBox, QMessageBox, QSplitter, QTextEdit, QRadioButton, QButtonGroup, QGroupBox, QComboBox
 import pandas as pd
 
-from core.comparator import ExcelComparator
+from core.comparison_service import ComparisonService
 from core.diff_highlighter import DiffHighlighter
 from core.string_comparator import StringComparator
 
@@ -188,17 +188,14 @@ class ComparisonTool(QMainWindow):
         """
         初始化比较工具主窗口
         
-        创建Excel比较器实例，初始化界面布局和数据存储
+        创建比较服务实例，初始化界面布局
         """
         super().__init__()
-        self.comparator = ExcelComparator()
+        self.service = ComparisonService()
         self.setup_ui()
         # 数据存储
-        self.file1_df = None  # 文件1的数据框
-        self.file2_df = None  # 文件2的数据框
         self.result_df = None  # 比较结果的数据框
         self.result_map = None  # 结果状态映射 {(行,列): 'equal'/'diff'}
-        self.rules = []  # 存储用户定义的比较规则
 
     def setup_ui(self):
         """
@@ -329,7 +326,7 @@ class ComparisonTool(QMainWindow):
         
     def open_workbook(self, alias="file1"):
         """
-        打开Excel工作簿并加载到比较器中
+        打开Excel工作簿并通过比较服务加载
         参数:
             alias: 工作簿别名，默认为"file1"
         """
@@ -339,11 +336,11 @@ class ComparisonTool(QMainWindow):
         
         logger.info(f"打开工作簿: {file_path}，别名为: {alias}")
         try:
-            self.comparator.load_workbook(file_path, alias)
+            # 使用服务加载工作簿
+            sheets = self.service.load_workbook(file_path, alias)
             if alias == "file1":
                 self.file1_path_label.setText(file_path)
                 # 更新工作表下拉列表
-                sheets = self.comparator.list_sheets(alias)
                 self.file1_sheet_input.clear()
                 for sheet in sheets:
                     self.file1_sheet_input.addItem(sheet)
@@ -354,7 +351,6 @@ class ComparisonTool(QMainWindow):
             else:  # file2
                 self.file2_path_label.setText(file_path)
                 # 更新工作表下拉列表
-                sheets = self.comparator.list_sheets(alias)
                 self.file2_sheet_input.clear()
                 for sheet in sheets:
                     self.file2_sheet_input.addItem(sheet)
@@ -379,15 +375,13 @@ class ComparisonTool(QMainWindow):
         """
         logger.info(f"加载工作表数据: 工作簿={alias}，工作表={sheet_name}")
         try:
-            df = self.comparator.get_sheet_dataframe(alias, sheet_name)
+            df = self.service.load_sheet_data(alias, sheet_name)
             model = PandasDataModel(df)
             if alias == "file1":
-                self.file1_df = df
                 self.file1_table.setModel(model)
                 # 连接选择信号
                 self.file1_table.selectionModel().selectionChanged.connect(self.update_file1_selection)
             else:  # file2
-                self.file2_df = df
                 self.file2_table.setModel(model)
                 # 连接选择信号
                 self.file2_table.selectionModel().selectionChanged.connect(self.update_file2_selection)
