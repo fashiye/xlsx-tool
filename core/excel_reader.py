@@ -9,9 +9,5 @@ def load_workbook_all_sheets(filepath):
     """
     # pandas will use openpyxl/xlrd depending on file type
     sheets = pd.read_excel(filepath, sheet_name=None, engine=None)
-    # Normalize DataFrames: keep index start from 0, columns as read
-    for name, df in sheets.items():
-        # Ensure DataFrame (empty -> empty df)
-        if df is None:
-            sheets[name] = pd.DataFrame()
+ 
     return sheets

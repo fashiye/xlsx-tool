@@ -4,11 +4,7 @@
 """
 import difflib
 import re
-
-try:
-    import textdistance
-except Exception:
-    textdistance = None
+import textdistance
 
 class StringComparator:
     def exact_match(self, s1, s2, ignore_case=False):

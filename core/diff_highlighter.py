@@ -10,6 +10,11 @@ import html
 
 class DiffHighlighter:
     def __init__(self):
+        """
+        初始化差异高亮器
+        
+        设置不同差异类型的HTML背景颜色
+        """
         self.colors = {
             'added': '#90EE90',      # 浅绿色
             'removed': '#FFB6C1',    # 浅红色
@@ -19,8 +24,22 @@ class DiffHighlighter:
 
     def highlight_text_diff(self, str1, str2):
         """
-        字符级别高亮差异，返回 (html_left, html_right)
-        使用 difflib.SequenceMatcher.get_opcodes()
+        字符级别高亮两个字符串之间的差异
+        
+        参数:
+            str1: 第一个字符串
+            str2: 第二个字符串
+            
+        返回:
+            tuple: (html_left, html_right)
+                - html_left: 第一个字符串的HTML高亮版本
+                - html_right: 第二个字符串的HTML高亮版本
+        
+        使用 difflib.SequenceMatcher.get_opcodes() 识别差异，并用不同颜色标记：
+        - 相同内容：正常显示
+        - 替换：浅黄色背景
+        - 删除：浅红色背景
+        - 插入：浅绿色背景
         """
         if str1 is None:
             str1 = ""
@@ -48,7 +67,20 @@ class DiffHighlighter:
 
     def unified_diff_html(self, lines1, lines2):
         """
-        生成 unified diff 的 HTML（以 <pre> 包裹）
+        生成统一差异格式的HTML
+        
+        参数:
+            lines1: 第一个文本的行列表
+            lines2: 第二个文本的行列表
+            
+        返回:
+            str: 包含统一差异格式的HTML字符串
+        
+        格式说明：
+        - 添加的行：浅绿色背景
+        - 删除的行：浅红色背景
+        - 差异上下文：浅黄色背景
+        - 其他行：正常显示
         """
         diff = list(difflib.unified_diff(lines1, lines2, lineterm=''))
         # HTML escape and color added/removed lines
@@ -67,8 +99,20 @@ class DiffHighlighter:
 
     def side_by_side_html(self, lines1, lines2):
         """
-        并排显示两组行，返回 HTML（左列为 lines1，右列为 lines2）
-        使用 SequenceMatcher 的 opcodes 来标记行差异颜色
+        并排显示两组行的差异，生成HTML格式
+        
+        参数:
+            lines1: 第一个文本的行列表，显示在左侧
+            lines2: 第二个文本的行列表，显示在右侧
+            
+        返回:
+            str: 包含并排行差异显示的HTML字符串
+        
+        使用 difflib.SequenceMatcher.get_opcodes() 识别行差异，并用不同颜色标记：
+        - 相同行：正常显示
+        - 替换行：左侧浅红色，右侧浅绿色
+        - 删除行：仅左侧浅红色
+        - 插入行：仅右侧浅绿色
         """
         matcher = difflib.SequenceMatcher(None, lines1, lines2)
         left_html = []
