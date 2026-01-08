@@ -194,6 +194,8 @@ class ComparisonTool(QMainWindow):
         self.service = ComparisonService()
         self.setup_ui()
         # 数据存储
+        self.file1_df = None  # 文件1的数据框
+        self.file2_df = None  # 文件2的数据框
         self.result_df = None  # 比较结果的数据框
         self.result_map = None  # 结果状态映射 {(行,列): 'equal'/'diff'}
 
@@ -381,10 +383,14 @@ class ComparisonTool(QMainWindow):
                 self.file1_table.setModel(model)
                 # 连接选择信号
                 self.file1_table.selectionModel().selectionChanged.connect(self.update_file1_selection)
+                # 保存数据到GUI实例变量
+                self.file1_df = df
             else:  # file2
                 self.file2_table.setModel(model)
                 # 连接选择信号
                 self.file2_table.selectionModel().selectionChanged.connect(self.update_file2_selection)
+                # 保存数据到GUI实例变量
+                self.file2_df = df
             logger.info(f"工作表数据加载成功: 工作簿={alias}，工作表={sheet_name}，形状={df.shape}")
         except Exception as e:
             logger.error(f"加载工作表失败: {str(e)}")
@@ -439,11 +445,8 @@ class ComparisonTool(QMainWindow):
             
         logger.info(f"尝试添加规则: {rule_text}")
         try:
-            # 验证规则格式
-            self.comparator.rule_engine.parse_rule(rule_text)
-            
-            # 添加到规则列表
-            self.rules.append(rule_text)
+            # 使用服务添加规则
+            self.service.add_rule(rule_text)
             
             # 更新规则列表显示
             self.update_rules_list()
@@ -462,12 +465,13 @@ class ComparisonTool(QMainWindow):
         """
         更新规则列表显示
         """
-        if not self.rules:
+        rules = self.service.get_rules()
+        if not rules:
             self.rules_list.setPlainText("无规则")
             return
             
         rules_text = "已添加规则:\n"
-        for i, rule in enumerate(self.rules, 1):
+        for i, rule in enumerate(rules, 1):
             rules_text += f"{i}. {rule}\n"
             
         self.rules_list.setPlainText(rules_text)
@@ -478,94 +482,40 @@ class ComparisonTool(QMainWindow):
         """
         执行比较操作
         
-        比较两个文件的数据框，支持使用用户定义的规则进行比较
-        将结果显示在diff_panel中，并支持在原表格中标红差异
+        调用比较服务执行比较，将结果显示在diff_panel中，并支持在原表格中标红差异
         """
         logger.info("开始执行比较操作")
         try:
             self.statusBar().showMessage("比较中...")
             
-            # 调试：检查file1_df和file2_df的类型和内容
-            logger.debug(f"file1_df类型: {type(self.file1_df)}, file1_df: {self.file1_df}")
-            logger.debug(f"file2_df类型: {type(self.file2_df)}, file2_df: {self.file2_df}")
-            logger.debug(f"file1_df形状: {self.file1_df.shape if hasattr(self.file1_df, 'shape') else '无shape属性'}")
-            logger.debug(f"file2_df形状: {self.file2_df.shape if hasattr(self.file2_df, 'shape') else '无shape属性'}")
+            # 检查是否使用规则
+            use_rules = len(self.service.get_rules()) > 0
             
-            if not self.file1_df or not self.file2_df:
-                QMessageBox.warning(self, "警告", "请先选择两个文件进行比较")
-                self.statusBar().showMessage("就绪")
-                logger.warning("比较失败：未选择两个文件")
-                return
+            # 执行比较
+            result_text, result_df, result_map = self.service.run_comparison(use_rules=use_rules)
             
-            result_text = ""
+            # 保存结果到实例变量
+            self.result_df = result_df
+            self.result_map = result_map
             
-            # 检查是否有用户定义的规则
-            if self.rules:
-                logger.info(f"使用{len(self.rules)}条用户定义规则进行比较")
-                # 使用规则引擎进行比较
-                
-                # 清除比较器中已有的规则
-                self.comparator.clear_rules()
-                
-                # 添加用户定义的规则
-                for rule in self.rules:
-                    self.comparator.add_rule(rule)
-                
-                # 验证所有规则
-                passed_rules, failed_rules = self.comparator.validate_with_dataframes(self.file1_df, self.file2_df)
-                
-                # 生成规则比较结果
-                result_text = "规则比较结果：\n"
-                result_text += f"总规则数: {len(self.rules)}\n"
-                result_text += f"通过规则数: {len(passed_rules)}\n"
-                result_text += f"失败规则数: {len(failed_rules)}\n\n"
-                
-                if passed_rules:
-                    result_text += "通过的规则：\n"
-                    for rule in passed_rules:
-                        result_text += f"  ✓ {rule}\n"
-                    result_text += "\n"
-                
-                if failed_rules:
-                    result_text += "失败的规则：\n"
-                    for rule in failed_rules:
-                        result_text += f"  ✗ {rule}\n"
-                    result_text += "\n"
-                
-                # 标记原表格中的差异（仅针对规则涉及的单元格）
+            # 在原表格中标红差异
+            if result_map:
                 self.highlight_differences_in_original_tables()
-                
-                logger.info(f"规则比较完成 - 通过{len(passed_rules)}条，失败{len(failed_rules)}条")
-                self.statusBar().showMessage(f"规则比较完成 - 通过{len(passed_rules)}条，失败{len(failed_rules)}条")
-            else:
-                logger.info("执行直接比较")
-                # 默认比较选项
-                options = {
-                    'tolerance': '0',
-                    'ignore_case': False
-                }
-                
-                # 执行直接比较
-                self.result_df, self.result_map = self.comparator.compare_direct(self.file1_df, self.file2_df, options)
-                
-                # 计算差异统计
-                total_cells = len(self.result_map)
-                equal_cells = sum(1 for status in self.result_map.values() if status == 'equal')
-                diff_cells = total_cells - equal_cells
-                diff_rate = diff_cells / total_cells if total_cells > 0 else 0
-                
-                # 在原表格中标红差异
-                self.highlight_differences_in_original_tables()
-                
-                # 将结果转换为字符串格式，显示在diff_panel中
-                result_text = self.format_comparison_result()
-                
-                logger.info(f"直接比较完成 - 总单元格数: {total_cells}，差异数: {diff_cells}，差异率: {diff_rate:.2%}")
-                self.statusBar().showMessage(f"比较完成 - 发现{diff_cells}处差异")
             
             # 显示结果
             self.diff_panel.set_diff_content(result_text)
             logger.info("比较结果显示完成")
+            
+            # 更新状态栏
+            if "规则" in result_text:
+                passed_count = result_text.count("✓")
+                failed_count = result_text.count("✗")
+                self.statusBar().showMessage(f"规则比较完成 - 通过{passed_count}条，失败{failed_count}条")
+            elif "差异单元格数" in result_text:
+                import re
+                match = re.search(r"差异单元格数: (\d+)", result_text)
+                diff_cells = int(match.group(1)) if match else 0
+                self.statusBar().showMessage(f"比较完成 - 发现{diff_cells}处差异")
             
         except Exception as e:
             logger.error(f"比较失败: {str(e)}")
@@ -664,10 +614,7 @@ class ComparisonTool(QMainWindow):
             return
         
         try:
-            if file_path.endswith('.xlsx'):
-                self.comparator.export_results(self.result_df, file_path, format='excel')
-            elif file_path.endswith('.csv'):
-                self.comparator.export_results(self.result_df, file_path, format='csv')
+            self.service.save_results(self.result_df, file_path)
             self.statusBar().showMessage(f"结果已保存到: {file_path}")
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存结果失败: {str(e)}")
