@@ -10,9 +10,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
-    noarchive=False,
-    optimize=0,
+    excludes=['setuptools', 'pkg_resources', 'pytest', 'pygments', 'jedi', 'parso'],
+    noarchive=True,
+    optimize=2,
 )
 pyz = PYZ(a.pure)
 
