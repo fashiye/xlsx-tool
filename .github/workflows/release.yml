@@ -40,5 +40,4 @@ jobs:
         draft: false
         prerelease: false
         files: ./dist/ExcelComparator.exe
-        asset_name: ExcelComparator.exe
-        asset_content_type: application/x-msdownload
+        overwrite: true
