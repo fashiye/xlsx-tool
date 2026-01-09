@@ -53,21 +53,28 @@ class RuleEngine:
         解析规则字符串为左侧表达式、操作符和右侧表达式
 
         参数:
-            rule: 规则字符串，如 "A1 + B1 = C1"
+            rule: 规则字符串，如 "A1 + B1 = C1" 或 "FILE1:A + FILE1:B = FILE1:c"
 
         返回:
             tuple: (left_expr, operator, right_expr)
         """
         logger.info(f"解析规则: {rule}")
-        # 查找比较操作符
-        for op in ['>=', '<=', '!=', '=', '>', '<']:
+        # 查找比较操作符，按优先级（长操作符优先）
+        comparison_ops = ['>=', '<=', '!=', '=', '>', '<']
+        for op in comparison_ops:
             if op in rule:
                 parts = rule.split(op, 1)
-                result = (parts[0].strip(), op, parts[1].strip())
+                left_expr = parts[0].strip()
+                right_expr = parts[1].strip()
+                # 检查是否有多个相同的比较操作符（防止错误拆分）
+                if any(op2 in left_expr for op2 in comparison_ops) or any(op2 in right_expr for op2 in comparison_ops):
+                    # 这可能不是真正的比较操作符，继续查找
+                    continue
+                result = (left_expr, op, right_expr)
                 logger.info(f"规则解析结果: {result}")
                 return result
-        logger.error(f"无效的规则格式：缺少比较操作符: {rule}")
-        raise ValueError("无效的规则格式：缺少比较操作符")
+        logger.error(f"无效的规则格式：缺少比较操作符或格式错误: {rule}")
+        raise ValueError("无效的规则格式：缺少比较操作符或格式错误")
     
     def parse_expression(self, expr):
         """
@@ -198,15 +205,15 @@ class RuleEngine:
     
     def evaluate_expression(self, expr, df1, df2=None):
         """
-        评估表达式的值，支持FILE1:和FILE2:前缀的单元格引用
+        评估表达式的值，支持FILE1:和FILE2:前缀的单元格引用和列引用
         
         参数:
-            expr: 算术表达式字符串，如 "A1 + B1" 或 "FILE1:A1 + FILE2:B1"
+            expr: 算术表达式字符串，如 "A1 + B1" 或 "FILE1:A1 + FILE2:B1" 或 "A + B"
             df1: 第一个数据帧（默认数据帧）
             df2: 第二个数据帧（可选，用于跨文件比较）
             
         返回:
-            float: 表达式的值
+            float 或 pd.Series: 表达式的值（标量）或列数据（Series）
         """
         logger.debug(f"evaluate_expression - 输入表达式: {expr}")
         logger.debug(f"evaluate_expression - df1类型: {type(df1)}, df1形状: {df1.shape}")
@@ -234,72 +241,37 @@ class RuleEngine:
                 a = stack.pop()
                 logger.debug(f"evaluate_expression - 弹出操作数: a={a} (类型: {type(a)}), b={b} (类型: {type(b)})")
                 
-                # 确保操作数是标量值
-                if hasattr(a, 'shape'):
-                    logger.debug(f"evaluate_expression - 操作数a是DataFrame/Series类型，需要转换为标量")
-                    if hasattr(a, 'iloc'):
-                        a = a.iloc[0, 0] if a.shape[0] > 0 and a.shape[1] > 0 else 0.0
-                    elif hasattr(a, 'item'):
-                        a = a.item()
-                    elif hasattr(a, '__len__'):
-                        a = float(a[0]) if len(a) > 0 else 0.0
-                    else:
-                        a = 0.0
-                    logger.debug(f"evaluate_expression - 转换后a={a} (类型: {type(a)})")
-                
-                if hasattr(b, 'shape'):
-                    logger.debug(f"evaluate_expression - 操作数b是DataFrame/Series类型，需要转换为标量")
-                    if hasattr(b, 'iloc'):
-                        b = b.iloc[0, 0] if b.shape[0] > 0 and b.shape[1] > 0 else 0.0
-                    elif hasattr(b, 'item'):
-                        b = b.item()
-                    elif hasattr(b, '__len__'):
-                        b = float(b[0]) if len(b) > 0 else 0.0
-                    else:
-                        b = 0.0
-                    logger.debug(f"evaluate_expression - 转换后b={b} (类型: {type(b)})")
-                
-                # 执行运算
+                # 执行运算（支持标量和Series运算）
                 op_func = self.operators[token][1]
                 logger.debug(f"evaluate_expression - 执行运算: {a} {token} {b}")
                 result = op_func(a, b)
                 logger.debug(f"evaluate_expression - 运算结果: {result} (类型: {type(result)})")
                 
-                # 确保结果是标量值
-                if hasattr(result, 'shape'):
-                    logger.debug(f"evaluate_expression - 运算结果是DataFrame/Series类型，需要转换为标量")
-                    if hasattr(result, 'iloc'):
-                        result = result.iloc[0, 0] if result.shape[0] > 0 and result.shape[1] > 0 else 0.0
-                    elif hasattr(result, 'item'):
-                        result = result.item()
-                    elif hasattr(result, '__len__'):
-                        result = float(result[0]) if len(result) > 0 else 0.0
-                    else:
-                        result = 0.0
-                    logger.debug(f"evaluate_expression - 转换后结果: {result} (类型: {type(result)})")
-                
                 stack.append(result)
             elif isinstance(token, str):
-                # 单元格引用：获取值
-                logger.debug(f"evaluate_expression - 单元格引用标记: {token}")
+                # 单元格引用或列引用：获取值
+                logger.debug(f"evaluate_expression - 单元格/列引用标记: {token}")
                 
                 if token.startswith('FILE1:'):
                     # FILE1前缀，使用df1
                     cell_ref = token[6:]
                     cell_value = self.get_cell_value(cell_ref, df1)
-                    logger.debug(f"evaluate_expression - FILE1单元格引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
+                    logger.debug(f"evaluate_expression - FILE1引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
                 elif token.startswith('FILE2:'):
                     # FILE2前缀，使用df2
                     if df2 is None:
-                        logger.error(f"evaluate_expression - 需要df2参数来处理FILE2:前缀的单元格引用")
-                        raise ValueError("需要df2参数来处理FILE2:前缀的单元格引用")
-                    cell_ref = token[6:]
-                    cell_value = self.get_cell_value(cell_ref, df2)
-                    logger.debug(f"evaluate_expression - FILE2单元格引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
+                        # 单表比较时，FILE2:也使用df1
+                        logger.warning(f"evaluate_expression - df2参数不存在，FILE2:前缀的引用将使用df1")
+                        cell_ref = token[6:]
+                        cell_value = self.get_cell_value(cell_ref, df1)
+                    else:
+                        cell_ref = token[6:]
+                        cell_value = self.get_cell_value(cell_ref, df2)
+                    logger.debug(f"evaluate_expression - FILE2引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
                 else:
                     # 默认使用df1
                     cell_value = self.get_cell_value(token, df1)
-                    logger.debug(f"evaluate_expression - 默认单元格引用: {token} = {cell_value} (类型: {type(cell_value)})")
+                    logger.debug(f"evaluate_expression - 默认引用: {token} = {cell_value} (类型: {type(cell_value)})")
                 
                 stack.append(cell_value)
             else:
@@ -312,21 +284,8 @@ class RuleEngine:
             logger.error(f"evaluate_expression - 表达式求值完成后栈中应有1个元素，但有{len(stack)}个: {stack}")
             raise ValueError("无效的表达式")
         
-        # 确保最终结果是标量值
         final_result = stack[0]
         logger.debug(f"evaluate_expression - 求值结果: {final_result} (类型: {type(final_result)})")
-        
-        if hasattr(final_result, 'shape'):
-            logger.debug(f"evaluate_expression - 最终结果是DataFrame/Series类型，需要转换为标量")
-            if hasattr(final_result, 'iloc'):
-                final_result = final_result.iloc[0, 0] if final_result.shape[0] > 0 and final_result.shape[1] > 0 else 0.0
-            elif hasattr(final_result, 'item'):
-                final_result = final_result.item()
-            elif hasattr(final_result, '__len__'):
-                final_result = float(final_result[0]) if len(final_result) > 0 else 0.0
-            else:
-                final_result = 0.0
-            logger.debug(f"evaluate_expression - 转换后最终结果: {final_result} (类型: {type(final_result)})")
         
         return final_result
     
@@ -439,9 +398,9 @@ class RuleEngine:
         支持单元格引用（如A1）和列引用（如A）
 
         参数:
-            rule: 规则字符串，如 "A1 + B1 = C1" 或 "FILE1:A = FILE2:A"
+            rule: 规则字符串，如 "A1 + B1 = C1" 或 "FILE1:A = FILE2:A" 或 "A + B = C"
             df1: 第一个数据帧（默认数据帧）
-            df2: 第二个数据帧（可选，用于跨文件比较）
+            df2: 第二个数据帧（可选，用于跨文件比较；如果为None，则使用单表比较）
 
         返回:
             tuple: (is_valid, failed_cells, passed_cells)
@@ -451,13 +410,18 @@ class RuleEngine:
         """
         logger.info(f"验证规则: {rule}")
         try:
-            # 确保df1和df2是DataFrame类型
+            # 确保df1是DataFrame类型
             if not hasattr(df1, 'iloc'):
                 logger.error(f"参数df1不是DataFrame类型: {type(df1)}")
                 return False, [], []
+            # df2可以是None（单表比较），如果不是None则必须是DataFrame类型
             if df2 is not None and not hasattr(df2, 'iloc'):
                 logger.error(f"参数df2不是DataFrame类型: {type(df2)}")
                 return False, [], []
+            
+            # 单表比较时，确保规则中的FILE1:和FILE2:都使用df1
+            if df2 is None:
+                logger.info("使用单表比较模式")
                 
             left_expr, op, right_expr = self.parse_rule(rule)
             logger.info(f"解析后的规则组件: 左表达式={left_expr}, 操作符={op}, 右表达式={right_expr}")
@@ -491,6 +455,37 @@ class RuleEngine:
                     logger.error(f"列长度不匹配: 左={len(left_value)}, 右={len(right_value)}")
                     return False, [], []
                 
+                # 尝试从规则中提取右侧表达式的列引用（作为结果标记的列）
+                right_col_ref = None
+                # 从右侧表达式中提取列引用
+                right_col_match = re.search(r'(FILE1:|FILE2:)?([A-Za-z]+)($|:|\s)', right_expr)
+                if right_col_match:
+                    right_col_ref = right_col_match.group(2)
+                    logger.info(f"从右侧表达式提取到列引用: {right_col_ref}")
+                
+                # 如果右侧没有列引用，尝试从左侧提取
+                if not right_col_ref:
+                    left_col_match = re.search(r'(FILE1:|FILE2:)?([A-Za-z]+)($|:|\s)', left_expr)
+                    if left_col_match:
+                        right_col_ref = left_col_match.group(2)
+                        logger.info(f"从左侧表达式提取到列引用: {right_col_ref}")
+                
+                # 如果还是没有找到列引用，默认使用第一列
+                if not right_col_ref:
+                    right_col_ref = 'A'
+                    logger.info(f"未找到列引用，使用默认列: {right_col_ref}")
+                
+                # 转换结果列字母为索引
+                result_col_idx = 0
+                for ch in right_col_ref.upper():
+                    result_col_idx = result_col_idx * 26 + (ord(ch) - ord('A') + 1)
+                result_col_idx -= 1
+                
+                # 检查结果列索引是否在范围内
+                if result_col_idx < 0 or result_col_idx >= df1.shape[1]:
+                    logger.error(f"结果列索引超出范围: {right_col_ref} (索引: {result_col_idx})")
+                    return False, [], []
+                
                 # 执行逐行比较
                 for i in range(len(left_value)):
                     lv = left_value.iloc[i]
@@ -515,12 +510,12 @@ class RuleEngine:
                             row_result = False
                         
                         if row_result:
-                            passed_cells.append((i, None))  # None表示列引用，没有具体列索引
+                            passed_cells.append((i, result_col_idx))  # 存储行索引和结果列索引
                         else:
-                            failed_cells.append((i, None))  # None表示列引用，没有具体列索引
+                            failed_cells.append((i, result_col_idx))  # 存储行索引和结果列索引
                     except Exception as e:
                         logger.error(f"行比较错误 (行{i+1}): {e}")
-                        failed_cells.append((i, None))
+                        failed_cells.append((i, result_col_idx))
                 
                 # 检查是否所有行都通过
                 all_passed = len(failed_cells) == 0

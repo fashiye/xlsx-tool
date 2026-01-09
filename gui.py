@@ -6,7 +6,7 @@ Excel数据对比工具 - GUI界面
 import logging
 from PyQt5.QtCore import Qt, QAbstractTableModel, QVariant
 from PyQt5.QtGui import QBrush, QColor, QFont
-from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QLineEdit, QTableView, QCheckBox, QMessageBox, QSplitter, QTextEdit, QRadioButton, QButtonGroup, QGroupBox, QComboBox
+from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QLineEdit, QTableView, QCheckBox, QMessageBox, QSplitter, QTextEdit, QRadioButton, QButtonGroup, QGroupBox, QComboBox, QScrollArea
 import pandas as pd
 
 from core.comparison_service import ComparisonService
@@ -20,6 +20,196 @@ logging.basicConfig(level=logging.DEBUG,
                         logging.StreamHandler()
                     ])
 logger = logging.getLogger(__name__)
+
+# ------------------ 全局样式配置 ------------------
+# 现代化的颜色方案
+COLOR_SCHEME = {
+    'primary': '#2196F3',       # 主色调 - 蓝色
+    'secondary': '#4CAF50',     # 辅助色 - 绿色
+    'accent': '#FFC107',        # 强调色 - 黄色
+    'danger': '#F44336',        # 危险色 - 红色
+    'warning': '#FF9800',       # 警告色 - 橙色
+    'light': '#F5F5F5',         # 浅色背景
+    'dark': '#333333',          # 深色文字
+    'border': '#E0E0E0',        # 边框颜色
+    'shadow': '#0000001A',      # 阴影颜色
+    'success_bg': '#E8F5E9',    # 成功背景色
+    'error_bg': '#FFEBEE',      # 错误背景色
+    'header_bg': '#263238',     # 表头背景色
+    'header_text': '#FFFFFF',   # 表头文字色
+    'rule_item_bg': '#FFFFFF',  # 规则项背景色
+    'scrollbar_bg': '#F5F5F5',  # 滚动条背景色
+    'scrollbar_handle': '#BDBDBD' # 滚动条滑块色
+}
+
+# 按钮样式
+def get_button_style(color=COLOR_SCHEME['primary'], hover_color=None, text_color='#FFFFFF'):
+    """
+    获取按钮的CSS样式
+    参数:
+        color: 按钮背景色
+        hover_color: 悬停时的背景色
+        text_color: 文字颜色
+    返回:
+        str: CSS样式字符串
+    """
+    if not hover_color:
+        # 如果没有提供悬停颜色，使用原颜色的深色调
+        # 简单实现：将RGB值降低15%
+        import re
+        match = re.match(r'#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})', color)
+        if match:
+            r, g, b = [int(x, 16) for x in match.groups()]
+            r = max(0, int(r * 0.85))
+            g = max(0, int(g * 0.85))
+            b = max(0, int(b * 0.85))
+            hover_color = f'#{r:02x}{g:02x}{b:02x}'
+        else:
+            hover_color = color
+    return """
+    QPushButton {
+        background-color: %s;
+        color: %s;
+        border: none;
+        border-radius: 6px;
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        min-width: 80px;
+    }
+    QPushButton:hover {
+        background-color: %s;
+    }
+    QPushButton:pressed {
+        background-color: %s;
+    }
+    QPushButton:disabled {
+        background-color: #BDBDBD;
+        color: #FFFFFF;
+    }
+    """ % (color, text_color, hover_color, color)
+
+# 输入框样式
+INPUT_STYLE = """
+QLineEdit {
+    border: 1px solid #BDBDBD;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 14px;
+    background-color: #FFFFFF;
+}
+QLineEdit:focus {
+    border-color: #2196F3;
+    outline: none;
+}
+QLineEdit:placeholder {
+    color: #9E9E9E;
+}
+"""
+
+# 表格视图样式
+TABLE_STYLE = """
+QTableView {
+    border: 1px solid #E0E0E0;
+    border-radius: 6px;
+    background-color: #FFFFFF;
+    gridline-color: #E0E0E0;
+}
+QTableView::header {
+    background-color: #263238;
+    color: #FFFFFF;
+    font-weight: bold;
+    font-size: 14px;
+    height: 36px;
+    border-radius: 4px;
+}
+QTableView::header::section {
+    border: 1px solid #37474F;
+    padding: 6px;
+}
+QTableView::item {
+    padding: 8px;
+    font-size: 13px;
+}
+QTableView::item:selected {
+    background-color: #E3F2FD;
+    color: #0D47A1;
+}
+"""
+
+# 规则项样式
+RULE_ITEM_STYLE = """
+QWidget {
+    border: 1px solid #E0E0E0;
+    border-radius: 6px;
+    background-color: #FFFFFF;
+    padding: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+QWidget:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+"""
+
+# 滚动区域样式
+SCROLL_AREA_STYLE = """
+QScrollArea {
+    border: 1px solid #E0E0E0;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+}
+QScrollBar:vertical {
+    background-color: #F5F5F5;
+    width: 8px;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical {
+    background-color: #BDBDBD;
+    border-radius: 4px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: #9E9E9E;
+}
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    background-color: transparent;
+}
+"""
+
+# 组框样式
+GROUP_BOX_STYLE = """
+QGroupBox {
+    border: 1px solid #E0E0E0;
+    border-radius: 6px;
+    margin-top: 8px;
+    padding: 16px 8px 8px 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 4px 0 4px;
+    font-weight: bold;
+    font-size: 14px;
+    color: #333333;
+}
+"""
+
+# 文本编辑区域样式
+TEXT_EDIT_STYLE = """
+QTextEdit {
+    border: 1px solid #E0E0E0;
+    border-radius: 4px;
+    padding: 8px;
+    font-size: 13px;
+    font-family: 'Courier New', monospace;
+    background-color: #FFFFFF;
+}
+QTextEdit:focus {
+    border-color: #2196F3;
+    outline: none;
+}
+"""
 
 # ------------------ 辅助函数 ------------------
 def 列索引转字母(col_index):
@@ -36,13 +226,21 @@ def 列索引转字母(col_index):
 def 选择索引转Excel范围(indexes):
     """
     将QModelIndex列表转换为Excel范围字符串
-    例如: 多个连续索引 -> 'A1:C5'
+    例如: 整列选择 -> 'A'
+    多个连续索引 -> 'A1:C5'
     单个索引 -> 'B2'
     """
     if not indexes:
         return ""
+    
+    # 检查是否是整列选择（所有行都被选中）
     rows = [idx.row() for idx in indexes]
     cols = [idx.column() for idx in indexes]
+    
+    # 如果所有索引的列相同，但行不同，则认为是整列选择
+    if len(set(cols)) == 1:
+        return 列索引转字母(cols[0])
+    
     start_row = min(rows)
     end_row = max(rows)
     start_col = min(cols)
@@ -154,17 +352,21 @@ class DiffDisplayPanel(QWidget):
         self.setup_ui()
 
     def setup_ui(self):
-        """初始化差异显示面板界面"""
+        """
+        初始化差异显示面板界面
+        """
         layout = QVBoxLayout()
         
         # 差异显示区域 - 仅保留一个文本编辑区域
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
         self.result_text.setFont(QFont("Courier", 10))
+        self.result_text.setStyleSheet(TEXT_EDIT_STYLE)
         layout.addWidget(self.result_text)
 
         # 差异统计标签
         self.stats_label = QLabel()
+        self.stats_label.setStyleSheet("QLabel { color: #333333; font-weight: bold; margin-top: 8px; font-size: 14px; }")
         layout.addWidget(self.stats_label)
         self.setLayout(layout)
     
@@ -206,32 +408,47 @@ class ComparisonTool(QMainWindow):
         self.setWindowTitle("Excel数据对比工具")
         self.setGeometry(100, 100, 1200, 800)
         
+        # 设置窗口样式
+        self.setStyleSheet("QMainWindow { background-color: #F5F5F5; }")
+        
         # 主控件和布局
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(15)  # 设置布局间距
+        main_layout.setContentsMargins(15, 15, 15, 15)
           
         # 主内容区域 - 文件选择区域
         content_layout = QHBoxLayout()
+        content_layout.setSpacing(15)
         main_layout.addLayout(content_layout)
         
         # 文件1区域
         file1_panel = QGroupBox("文件1区域")
+        file1_panel.setStyleSheet(GROUP_BOX_STYLE)
         file1_layout = QVBoxLayout(file1_panel)
+        file1_layout.setSpacing(10)
         
         # 文件1控件
         file1_controls_layout = QHBoxLayout()
+        file1_controls_layout.setSpacing(10)
         self.file1_path_label = QLabel("未选择文件")
+        self.file1_path_label.setStyleSheet("QLabel { color: #333333; font-size: 13px; }")
         file1_controls_layout.addWidget(self.file1_path_label)
         file1_browse_btn = QPushButton("浏览...")
+        file1_browse_btn.setStyleSheet(get_button_style(COLOR_SCHEME['primary'], COLOR_SCHEME['dark']))
         file1_browse_btn.clicked.connect(lambda: self.open_workbook(alias="file1"))
         file1_controls_layout.addWidget(file1_browse_btn)
         file1_layout.addLayout(file1_controls_layout)
         
         # 文件1工作表选择
         file1_sheet_layout = QHBoxLayout()
-        file1_sheet_layout.addWidget(QLabel("工作表:"))
+        file1_sheet_layout.setSpacing(10)
+        file1_sheet_label = QLabel("工作表:")
+        file1_sheet_label.setStyleSheet("QLabel { color: #333333; font-size: 13px; }")
+        file1_sheet_layout.addWidget(file1_sheet_label)
         self.file1_sheet_input = QComboBox()
+        self.file1_sheet_input.setStyleSheet("QComboBox { border: 1px solid #BDBDBD; border-radius: 4px; padding: 6px; background-color: #FFFFFF; }")
         # 连接工作表选择变化信号
         self.file1_sheet_input.currentIndexChanged.connect(lambda: self.load_sheet_data("file1", self.file1_sheet_input.currentText()))
         file1_sheet_layout.addWidget(self.file1_sheet_input)
@@ -240,27 +457,38 @@ class ComparisonTool(QMainWindow):
         # 文件1表格视图
         self.file1_table = QTableView()
         self.file1_table.setSelectionMode(self.file1_table.ExtendedSelection)
+        self.file1_table.setSelectionBehavior(self.file1_table.SelectColumns)
+        self.file1_table.setStyleSheet(TABLE_STYLE)
         file1_layout.addWidget(self.file1_table)
         
         content_layout.addWidget(file1_panel, 1)
         
         # 文件2区域
         file2_panel = QGroupBox("文件2区域")
+        file2_panel.setStyleSheet(GROUP_BOX_STYLE)
         file2_layout = QVBoxLayout(file2_panel)
+        file2_layout.setSpacing(10)
         
         # 文件2控件
         file2_controls_layout = QHBoxLayout()
+        file2_controls_layout.setSpacing(10)
         self.file2_path_label = QLabel("未选择文件")
+        self.file2_path_label.setStyleSheet("QLabel { color: #333333; font-size: 13px; }")
         file2_controls_layout.addWidget(self.file2_path_label)
         file2_browse_btn = QPushButton("浏览...")
+        file2_browse_btn.setStyleSheet(get_button_style(COLOR_SCHEME['primary'], COLOR_SCHEME['dark']))
         file2_browse_btn.clicked.connect(lambda: self.open_workbook(alias="file2"))
         file2_controls_layout.addWidget(file2_browse_btn)
         file2_layout.addLayout(file2_controls_layout)
         
         # 文件2工作表选择
         file2_sheet_layout = QHBoxLayout()
-        file2_sheet_layout.addWidget(QLabel("工作表:"))
+        file2_sheet_layout.setSpacing(10)
+        file2_sheet_label = QLabel("工作表:")
+        file2_sheet_label.setStyleSheet("QLabel { color: #333333; font-size: 13px; }")
+        file2_sheet_layout.addWidget(file2_sheet_label)
         self.file2_sheet_input = QComboBox()
+        self.file2_sheet_input.setStyleSheet("QComboBox { border: 1px solid #BDBDBD; border-radius: 4px; padding: 6px; background-color: #FFFFFF; }")
         # 连接工作表选择变化信号
         self.file2_sheet_input.currentIndexChanged.connect(lambda: self.load_sheet_data("file2", self.file2_sheet_input.currentText()))
         file2_sheet_layout.addWidget(self.file2_sheet_input)
@@ -269,51 +497,100 @@ class ComparisonTool(QMainWindow):
         # 文件2表格视图
         self.file2_table = QTableView()
         self.file2_table.setSelectionMode(self.file2_table.ExtendedSelection)
+        self.file2_table.setSelectionBehavior(self.file2_table.SelectColumns)
+        self.file2_table.setStyleSheet(TABLE_STYLE)
         file2_layout.addWidget(self.file2_table)
         
         content_layout.addWidget(file2_panel, 1)
         
-        # 比较控制区域
-        compare_controls_layout = QHBoxLayout()
-        self.start_compare_btn = QPushButton("开始比较")
-        self.start_compare_btn.clicked.connect(self.run_comparison)
-        compare_controls_layout.addWidget(self.start_compare_btn)
-        
-        self.export_btn = QPushButton("导出结果")
-        self.export_btn.clicked.connect(self.export_results)
-        compare_controls_layout.addWidget(self.export_btn)
-        
-        main_layout.addLayout(compare_controls_layout)
+        # 比较控制按钮将移到结果显示区域
         
         # 下方区域分为左右两栏
         bottom_layout = QHBoxLayout()
+        bottom_layout.setSpacing(15)
         main_layout.addLayout(bottom_layout, 1)
         
         # 左下方：规则输入区域
         rules_group_box = QGroupBox("规则输入")
+        rules_group_box.setStyleSheet(GROUP_BOX_STYLE)
         rules_layout = QVBoxLayout(rules_group_box)
+        rules_layout.setSpacing(10)
         bottom_layout.addWidget(rules_group_box, 1)
         
         # 规则输入控件
         self.rule_input = QLineEdit()
         self.rule_input.setPlaceholderText("输入比较规则，例如：A1 + B1 = C1 或 FILE1:A1 = FILE2:A1")
+        self.rule_input.setStyleSheet(INPUT_STYLE)
         rules_layout.addWidget(self.rule_input)
+        
+        # 备注输入控件
+        self.comment_input = QLineEdit()
+        self.comment_input.setPlaceholderText("输入规则备注（可选）")
+        self.comment_input.setStyleSheet(INPUT_STYLE)
+        rules_layout.addWidget(self.comment_input)
         
         # 添加规则按钮
         self.add_rule_btn = QPushButton("添加规则")
+        self.add_rule_btn.setStyleSheet(get_button_style(COLOR_SCHEME['secondary'], COLOR_SCHEME['dark']))
         self.add_rule_btn.clicked.connect(self.add_rule)
         rules_layout.addWidget(self.add_rule_btn)
         
-        # 规则列表
-        self.rules_list = QTextEdit()
-        self.rules_list.setReadOnly(True)
-        self.rules_list.setPlaceholderText("已添加的规则将显示在这里")
-        rules_layout.addWidget(self.rules_list)
+        # 导入导出规则按钮
+        import_export_layout = QHBoxLayout()
+        import_export_layout.setSpacing(10)
+        
+        self.import_rule_btn = QPushButton("导入规则")
+        self.import_rule_btn.setStyleSheet(get_button_style(COLOR_SCHEME['primary'], COLOR_SCHEME['dark']))
+        self.import_rule_btn.clicked.connect(self.import_rule)
+        import_export_layout.addWidget(self.import_rule_btn)
+        
+        self.export_rule_btn = QPushButton("导出规则")
+        self.export_rule_btn.setStyleSheet(get_button_style(COLOR_SCHEME['primary'], COLOR_SCHEME['dark']))
+        self.export_rule_btn.clicked.connect(self.export_rule)
+        import_export_layout.addWidget(self.export_rule_btn)
+        
+        rules_layout.addLayout(import_export_layout)
+        
+        # 规则列表容器 - 使用QScrollArea和QVBoxLayout实现动态规则项和滚动条
+        self.rules_scroll_area = QScrollArea()
+        self.rules_scroll_area.setWidgetResizable(True)  # 允许内容大小自适应
+        self.rules_scroll_area.setStyleSheet(SCROLL_AREA_STYLE)
+        
+        self.rules_container = QWidget()
+        self.rules_layout = QVBoxLayout(self.rules_container)
+        self.rules_layout.setSpacing(10)  # 设置规则项之间的间距
+        self.rules_layout.setAlignment(Qt.AlignTop)  # 内容顶部对齐
+        self.rules_container.setStyleSheet("QWidget { background-color: #FFFFFF; }")
+        
+        self.rules_scroll_area.setWidget(self.rules_container)  # 将容器放入滚动区域
+        rules_layout.addWidget(self.rules_scroll_area)  # 添加滚动区域到主布局
         
         # 右下方：结果显示区域
         results_group_box = QGroupBox("比较结果")
+        results_group_box.setStyleSheet(GROUP_BOX_STYLE)
         results_layout = QVBoxLayout(results_group_box)
+        results_layout.setSpacing(10)
         bottom_layout.addWidget(results_group_box, 1)
+        
+        # 比较控制按钮区域
+        compare_controls_layout = QHBoxLayout()
+        compare_controls_layout.setSpacing(10)
+        self.start_compare_btn = QPushButton("开始比较")
+        self.start_compare_btn.setStyleSheet(get_button_style(COLOR_SCHEME['primary'], COLOR_SCHEME['dark']))
+        self.start_compare_btn.clicked.connect(self.run_comparison)
+        compare_controls_layout.addWidget(self.start_compare_btn)
+        
+        self.export_btn = QPushButton("导出结果")
+        self.export_btn.setStyleSheet(get_button_style(COLOR_SCHEME['secondary'], COLOR_SCHEME['dark']))
+        self.export_btn.clicked.connect(self.export_results)
+        compare_controls_layout.addWidget(self.export_btn)
+        
+        self.save_original_btn = QPushButton("保存原始表格（带颜色标记）")
+        self.save_original_btn.setStyleSheet(get_button_style(COLOR_SCHEME['warning'], COLOR_SCHEME['dark'], '#333333'))
+        self.save_original_btn.clicked.connect(self.save_original_with_highlights)
+        compare_controls_layout.addWidget(self.save_original_btn)
+        
+        results_layout.addLayout(compare_controls_layout)
         
         # 差异显示面板
         self.diff_panel = DiffDisplayPanel()
@@ -396,14 +673,10 @@ class ComparisonTool(QMainWindow):
     def update_file1_selection(self, selected, deselected):
         """
         更新文件1的单元格选择
-        将选择的单个单元格自动插入到规则输入框中
+        将选择的单元格或列自动插入到规则输入框中
         """
         selected_indexes = selected.indexes()
         if not selected_indexes:
-            return
-        
-        # 只处理单个单元格选择
-        if len(selected_indexes) > 1:
             return
             
         range_str = 选择索引转Excel范围(selected_indexes)
@@ -415,14 +688,10 @@ class ComparisonTool(QMainWindow):
     def update_file2_selection(self, selected, deselected):
         """
         更新文件2的单元格选择
-        将选择的单个单元格自动插入到规则输入框中
+        将选择的单元格或列自动插入到规则输入框中
         """
         selected_indexes = selected.indexes()
         if not selected_indexes:
-            return
-        
-        # 只处理单个单元格选择
-        if len(selected_indexes) > 1:
             return
             
         range_str = 选择索引转Excel范围(selected_indexes)
@@ -436,20 +705,22 @@ class ComparisonTool(QMainWindow):
         添加比较规则到规则列表
         """
         rule_text = self.rule_input.text().strip()
+        comment = self.comment_input.text().strip()
         if not rule_text:
             QMessageBox.warning(self, "警告", "请输入有效的比较规则")
             return
             
-        logger.info(f"尝试添加规则: {rule_text}")
+        logger.info(f"尝试添加规则: {rule_text}，备注: {comment}")
         try:
             # 使用服务添加规则
-            self.service.add_rule(rule_text)
+            self.service.add_rule(rule_text, comment)
             
             # 更新规则列表显示
             self.update_rules_list()
             
             # 清空输入框
             self.rule_input.clear()
+            self.comment_input.clear()
             
             logger.info(f"规则添加成功: {rule_text}")
             self.statusBar().showMessage(f"规则添加成功: {rule_text}")
@@ -460,18 +731,144 @@ class ComparisonTool(QMainWindow):
     
     def update_rules_list(self):
         """
-        更新规则列表显示
+        更新规则列表显示，动态生成每个规则项的控件
+        """
+        rules = self.service.get_rules()
+        
+        # 清除现有规则项控件
+        while self.rules_layout.count() > 0:
+            item = self.rules_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        
+        # 如果没有规则，添加提示标签
+        if not rules:
+            no_rules_label = QLabel("无规则")
+            no_rules_label.setAlignment(Qt.AlignCenter)
+            no_rules_label.setStyleSheet("color: gray; font-size: 14px; padding: 16px;")
+            self.rules_layout.addWidget(no_rules_label)
+            return
+            
+        # 动态生成每个规则项
+        for i, rule_dict in enumerate(rules, 1):
+            rule_text = rule_dict['rule']
+            comment = rule_dict['comment']
+            
+            # 创建规则项容器
+            rule_item = QWidget()
+            rule_item_layout = QHBoxLayout(rule_item)
+            rule_item_layout.setContentsMargins(8, 8, 8, 8)  # 设置内边距
+            rule_item.setStyleSheet(RULE_ITEM_STYLE)
+            
+            # 规则序号和文本
+            rule_label = QLabel(f"{i}. {rule_text}")
+            rule_label.setStyleSheet("font-weight: bold; color: #333333; font-size: 14px;")
+            rule_label.setWordWrap(True)  # 允许换行
+            rule_item_layout.addWidget(rule_label, 3)  # 设置伸缩因子
+            
+            # 备注输入框
+            comment_input = QLineEdit()
+            comment_input.setPlaceholderText("规则备注")
+            comment_input.setStyleSheet(INPUT_STYLE)
+            if comment:
+                comment_input.setText(comment)
+            # 连接文本变化信号，用于更新备注
+            comment_input.textChanged.connect(lambda text, idx=i-1: self.update_rule_comment(idx, text))
+            rule_item_layout.addWidget(comment_input, 2)
+            
+            # 删除按钮
+            delete_btn = QPushButton("删除")
+            delete_btn.setStyleSheet(get_button_style(COLOR_SCHEM['danger'], COLOR_SCHEM['dark']))
+            delete_btn.setFixedWidth(60)
+            delete_btn.setFixedHeight(30)
+            # 连接删除按钮点击信号，使用lambda传递索引
+            delete_btn.clicked.connect(lambda checked, idx=i-1: self.remove_rule(idx))
+            rule_item_layout.addWidget(delete_btn)
+            
+            # 添加规则项到布局
+            self.rules_layout.addWidget(rule_item)
+            # 添加间隔
+            self.rules_layout.addSpacing(8)
+    
+    def remove_rule(self, index):
+        """
+        删除指定索引的规则
+        参数:
+            index: 规则索引
+        """
+        rules = self.service.get_rules()
+        if 0 <= index < len(rules):
+            rule_text = rules[index]['rule']
+            self.service.rules.pop(index)  # 从服务中删除规则
+            self.update_rules_list()  # 更新UI显示
+            logger.info(f"删除规则成功: {rule_text}")
+            self.statusBar().showMessage(f"已删除规则: {rule_text}")
+    
+    def update_rule_comment(self, index, comment):
+        """
+        更新指定索引规则的备注
+        参数:
+            index: 规则索引
+            comment: 新的备注文本
+        """
+        rules = self.service.get_rules()
+        if 0 <= index < len(rules):
+            rules[index]['comment'] = comment  # 更新备注
+            logger.debug(f"更新规则备注: 索引={index}, 新备注={comment}")
+    
+    def import_rule(self):
+        """
+        从文件导入规则
+        """
+        file_path, _ = QFileDialog.getOpenFileName(self, "导入规则文件", "", "文本文件 (*.txt);;所有文件 (*.*)")
+        if not file_path:
+            return
+            
+        try:
+            self.service.import_rules(file_path)
+            self.update_rules_list()
+            self.statusBar().showMessage(f"规则导入成功: {file_path}")
+        except Exception as e:
+            logger.error(f"规则导入失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"规则导入失败: {str(e)}")
+    
+    def export_rule(self):
+        """
+        将当前规则列表导出到文本文件
         """
         rules = self.service.get_rules()
         if not rules:
-            self.rules_list.setPlainText("无规则")
+            QMessageBox.warning(self, "警告", "没有可导出的规则")
             return
             
-        rules_text = "已添加规则:\n"
-        for i, rule in enumerate(rules, 1):
-            rules_text += f"{i}. {rule}\n"
+        # 打开文件保存对话框
+        file_path, _ = QFileDialog.getSaveFileName(self, "导出规则文件", "rules.txt", "文本文件 (*.txt);;所有文件 (*.*)")
+        if not file_path:
+            return
             
-        self.rules_list.setPlainText(rules_text)
+        try:
+            # 写入规则到文件
+            with open(file_path, 'w', encoding='utf-8') as f:
+                # 写入文件头注释
+                f.write("# Excel数据对比工具 - 规则文件\n")
+                f.write("# 格式：规则文本 # 备注（可选）\n\n")
+                
+                # 写入每条规则
+                for rule_dict in rules:
+                    rule_text = rule_dict['rule']
+                    comment = rule_dict['comment']
+                    if comment:
+                        f.write(f"{rule_text}  # {comment}\n")
+                    else:
+                        f.write(f"{rule_text}\n")
+            
+            logger.info(f"规则导出成功: {file_path}")
+            self.statusBar().showMessage(f"规则导出成功: {file_path}")
+            QMessageBox.information(self, "成功", f"规则已导出到: {file_path}")
+        except Exception as e:
+            logger.error(f"规则导出失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"规则导出失败: {str(e)}")
     
 
     
@@ -622,5 +1019,104 @@ class ComparisonTool(QMainWindow):
         导出比较结果，与保存结果功能相同
         """
         self.save_results()
+    
+    def save_original_with_highlights(self):
+        """
+        保存带有颜色标记的原始表格
+        
+        允许用户选择保存文件1或文件2的原始表格，并添加颜色标记
+        支持单表操作
+        """
+        # 检查是否有至少一个文件和比较结果
+        has_file1 = self.file1_df is not None and not self.file1_df.empty
+        has_file2 = self.file2_df is not None and not self.file2_df.empty
+        
+        if not has_file1 and not has_file2:
+            QMessageBox.warning(self, "警告", "请先加载至少一个文件进行比较")
+            return
+        
+        if self.result_map is None:
+            QMessageBox.warning(self, "警告", "请先执行比较操作")
+            return
+        
+        # 询问用户要保存哪个文件的原始表格
+        msg_box = QMessageBox()
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setWindowTitle("选择保存的表格")
+        
+        # 根据加载的文件显示不同的选项
+        if has_file1 and has_file2:
+            msg_box.setText("请选择要保存的原始表格：")
+            msg_box.addButton("文件1", QMessageBox.ActionRole)
+            msg_box.addButton("文件2", QMessageBox.ActionRole)
+            msg_box.addButton(QMessageBox.Cancel)
+        elif has_file1:
+            msg_box.setText("将保存文件1的原始表格")
+            msg_box.addButton("确定", QMessageBox.ActionRole)
+            msg_box.addButton(QMessageBox.Cancel)
+        else:  # has_file2
+            msg_box.setText("将保存文件2的原始表格")
+            msg_box.addButton("确定", QMessageBox.ActionRole)
+            msg_box.addButton(QMessageBox.Cancel)
+        
+        choice = msg_box.exec_()
+        if choice == 1:  # Cancel
+            return
+        
+        # 根据用户选择获取对应的DataFrame
+        if not has_file2 or (has_file1 and (choice == 0 or not has_file2)):
+            df_to_save = self.file1_df
+            file_name = "file1"
+        else:
+            df_to_save = self.file2_df
+            file_name = "file2"
+        
+        # 显示文件保存对话框
+        file_path, _ = QFileDialog.getSaveFileName(self, "保存原始表格（带颜色标记）", 
+                                                   f"{file_name}_with_highlights.xlsx", 
+                                                   "Excel Files (*.xlsx)")
+        if not file_path:
+            return
+        
+        try:
+            # 处理result_map以获取failed_cells和passed_cells
+            failed_cells = []
+            passed_cells = []
+            
+            if isinstance(self.result_map, dict):
+                if 'failed_cells' in self.result_map:
+                    # 规则比较的情况
+                    rule_failed = self.result_map.get('failed_cells', [])
+                    rule_passed = self.result_map.get('passed_cells', [])
+                    
+                    # 转换格式：[(rule, row_idx, col_idx), ...] → [(row_idx, col_idx), ...]
+                    for item in rule_failed:
+                        if len(item) == 3:
+                            failed_cells.append((item[1], item[2]))  # 只取row_idx和col_idx
+                        elif len(item) == 2:
+                            failed_cells.append(item)
+                    
+                    for item in rule_passed:
+                        if len(item) == 3:
+                            passed_cells.append((item[1], item[2]))  # 只取row_idx和col_idx
+                        elif len(item) == 2:
+                            passed_cells.append(item)
+                else:
+                    # 直接比较的情况
+                    for (row, col), status in self.result_map.items():
+                        if status == 'diff':
+                            failed_cells.append((row, col))
+                        elif status == 'equal':
+                            passed_cells.append((row, col))
+            
+            # 调用服务保存带颜色标记的原始表格
+            self.service.save_original_with_highlights(df_to_save, file_path, failed_cells, passed_cells)
+            
+            self.statusBar().showMessage(f"带颜色标记的原始表格已保存到: {file_path}")
+            QMessageBox.information(self, "成功", f"带颜色标记的原始表格已保存到: {file_path}")
+        except Exception as e:
+            logger.error(f"保存带颜色标记的原始表格失败: {str(e)}")
+            QMessageBox.critical(self, "错误", f"保存失败: {str(e)}")
+            self.statusBar().showMessage("保存失败")
     
 

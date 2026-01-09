@@ -33,7 +33,7 @@ class ComparisonService:
         创建Excel比较器实例，初始化数据存储
         """
         self.comparator = ExcelComparator()
-        self.rules = []  # 存储用户定义的比较规则
+        self.rules = []  # 存储用户定义的比较规则，每个元素是一个字典 {'rule': '规则文本', 'comment': '备注'}
         
         # 数据存储
         self.file1_df = None  # 文件1的数据框
@@ -90,23 +90,24 @@ class ComparisonService:
         
         return df
     
-    def add_rule(self, rule_text):
+    def add_rule(self, rule_text, comment=""):
         """
         添加比较规则
         
         参数:
             rule_text: 规则文本，例如："A1 + B1 = C1" 或 "FILE1:A1 = FILE2:A1"
+            comment: 规则备注
             
         返回:
             bool: 规则添加是否成功
         """
-        logger.info(f"尝试添加规则: {rule_text}")
+        logger.info(f"尝试添加规则: {rule_text}，备注: {comment}")
         try:
             # 验证规则格式
             self.comparator.rule_engine.parse_rule(rule_text)
             
             # 添加到规则列表
-            self.rules.append(rule_text)
+            self.rules.append({'rule': rule_text, 'comment': comment})
             logger.info(f"规则添加成功: {rule_text}")
             return True
         except Exception as e:
@@ -126,6 +127,44 @@ class ComparisonService:
         """
         return self.rules
     
+    def import_rules(self, file_path):
+        """
+        从文件导入规则
+        支持格式：规则文本 # 备注
+        
+        参数:
+            file_path: 规则文件路径
+            
+        返回:
+            bool: 导入是否成功
+        """
+        logger.info(f"从文件导入规则: {file_path}")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            
+            # 解析并添加规则
+            imported_count = 0
+            for line in lines:
+                # 分割规则和备注
+                if '#' in line:
+                    parts = line.split('#', 1)
+                    rule_text = parts[0].strip()
+                    comment = parts[1].strip()
+                else:
+                    rule_text = line.strip()
+                    comment = ""
+                
+                if rule_text:
+                    self.add_rule(rule_text, comment)
+                    imported_count += 1
+            
+            logger.info(f"成功导入{imported_count}条规则")
+            return True
+        except Exception as e:
+            logger.error(f"导入规则失败: {str(e)}")
+            raise Exception(f"导入规则失败: {str(e)}") from e
+    
     def run_comparison(self, use_rules=True, options=None):
         """
         执行比较操作
@@ -143,9 +182,17 @@ class ComparisonService:
         logger.info("开始执行比较操作")
         logger.debug(f"run_comparison参数 - use_rules: {use_rules}, options: {options}")
         
-        if self.file1_df is None or self.file2_df is None or self.file1_df.empty or self.file2_df.empty:
-            logger.warning("比较失败：未选择两个文件")
-            raise Exception("请先选择两个文件进行比较")
+        # 检查数据框是否可用
+        if use_rules and self.rules:
+            # 规则比较可以使用单表或双表
+            if self.file1_df is None or self.file1_df.empty:
+                logger.warning("比较失败：未选择文件")
+                raise Exception("请先选择至少一个文件进行比较")
+        else:
+            # 直接比较需要两个文件
+            if self.file1_df is None or self.file2_df is None or self.file1_df.empty or self.file2_df.empty:
+                logger.warning("比较失败：未选择两个文件")
+                raise Exception("请先选择两个文件进行比较")
         
         result_text = ""
         
@@ -160,11 +207,17 @@ class ComparisonService:
             self.comparator.clear_rules()
             
             # 添加用户定义的规则
-            for rule in self.rules:
-                self.comparator.add_rule(rule)
+            for rule_dict in self.rules:
+                self.comparator.add_rule(rule_dict['rule'])
             
             # 验证所有规则
-            passed_rules, failed_rules = self.comparator.validate_with_dataframes(self.file1_df, self.file2_df)
+            # 如果file2_df不存在或为空，则使用单表比较（将None作为df2参数）
+            if self.file2_df is None or self.file2_df.empty:
+                logger.info("使用单表比较模式进行规则验证")
+                passed_rules, failed_rules, all_failed_cells, all_passed_cells = self.comparator.validate_with_dataframes(self.file1_df, None)
+            else:
+                logger.info("使用双表比较模式进行规则验证")
+                passed_rules, failed_rules, all_failed_cells, all_passed_cells = self.comparator.validate_with_dataframes(self.file1_df, self.file2_df)
             
             # 生成规则比较结果
             result_text = f"规则比较结果：\n"
@@ -192,7 +245,10 @@ class ComparisonService:
                 rules_data.append({'规则': rule, '状态': '失败'})
             
             result_df = pd.DataFrame(rules_data)
-            return result_text, result_df, None
+            
+            # 创建结果映射，用于GUI高亮显示
+            result_map = {'failed_cells': all_failed_cells, 'passed_cells': all_passed_cells}
+            return result_text, result_df, result_map
         else:
             logger.info("执行直接比较")
             # 默认比较选项
@@ -333,3 +389,33 @@ class ComparisonService:
         except Exception as e:
             logger.error(f"保存结果失败: {str(e)}")
             raise Exception(f"保存结果失败: {str(e)}") from e
+    
+    def save_original_with_highlights(self, df, file_path, failed_cells=None, passed_cells=None):
+        """
+        将原始表格另存为并添加颜色标记
+        
+        参数:
+            df: 原始数据框
+            file_path: 保存路径
+            failed_cells: 失败的单元格列表，格式为[(row1, col1), (row2, col2)]
+            passed_cells: 通过的单元格列表，格式为[(row1, col1), (row2, col2)]
+            
+        返回:
+            bool: 保存是否成功
+        """
+        if df is None or df.empty:
+            logger.warning("没有可保存的原始表格")
+            return False
+        
+        try:
+            if not file_path.endswith('.xlsx'):
+                logger.error("只能保存为Excel文件(.xlsx)格式")
+                return False
+            
+            logger.info(f"将原始表格另存为并添加颜色标记: {file_path}")
+            self.comparator.export_with_highlights(df, file_path, failed_cells, passed_cells)
+            logger.info(f"带颜色标记的原始表格已保存到: {file_path}")
+            return True
+        except Exception as e:
+            logger.error(f"保存带颜色标记的原始表格失败: {str(e)}")
+            raise Exception(f"保存带颜色标记的原始表格失败: {str(e)}") from e

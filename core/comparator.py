@@ -8,6 +8,9 @@ from core.rule_engine import RuleEngine
 import pandas as pd
 import re
 import logging
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 # 配置日志记录
 logging.basicConfig(level=logging.DEBUG, 
@@ -305,6 +308,59 @@ class ExcelComparator:
         except Exception as e:
             logger.error(f"导出结果失败: {str(e)}")
             return False
+    
+    def export_with_highlights(self, df, output_path, failed_cells=None, passed_cells=None):
+        """
+        导出带有颜色标记的表格到Excel文件
+        
+        参数:
+            df: 要导出的数据框
+            output_path: 输出文件路径
+            failed_cells: 失败的单元格列表，格式为[(row1, col1), (row2, col2)]
+            passed_cells: 通过的单元格列表，格式为[(row1, col1), (row2, col2)]
+            
+        返回:
+            bool: 导出是否成功
+        """
+        logger.info(f"开始导出带有颜色标记的表格到: {output_path}")
+        try:
+            # 创建工作簿和工作表
+            wb = Workbook()
+            ws = wb.active
+            
+            # 创建填充样式
+            passed_fill = PatternFill(start_color='ADD8E6', end_color='ADD8E6', fill_type='solid')  # 蓝色
+            failed_fill = PatternFill(start_color='FFCCCB', end_color='FFCCCB', fill_type='solid')  # 红色
+            
+            # 将DataFrame数据写入工作表
+            for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+                ws.append(row)
+            
+            # 标记失败的单元格
+            if failed_cells:
+                for row_idx, col_idx in failed_cells:
+                    # 在Excel中，行和列都是从1开始的，且header占用了第一行
+                    excel_row = row_idx + 2  # +1是因为DataFrame索引从0开始，+1是因为有header
+                    excel_col = col_idx + 1  # 列索引从0开始
+                    cell = ws.cell(row=excel_row, column=excel_col)
+                    cell.fill = failed_fill
+            
+            # 标记通过的单元格
+            if passed_cells:
+                for row_idx, col_idx in passed_cells:
+                    # 在Excel中，行和列都是从1开始的，且header占用了第一行
+                    excel_row = row_idx + 2  # +1是因为DataFrame索引从0开始，+1是因为有header
+                    excel_col = col_idx + 1  # 列索引从0开始
+                    cell = ws.cell(row=excel_row, column=excel_col)
+                    cell.fill = passed_fill
+            
+            # 保存文件
+            wb.save(output_path)
+            logger.info(f"带有颜色标记的Excel文件导出成功: {output_path}")
+            return True
+        except Exception as e:
+            logger.error(f"导出带有颜色标记的表格失败: {str(e)}")
+            return False
 
     def add_rule(self, rule):
         """
@@ -332,16 +388,23 @@ class ExcelComparator:
     
     def validate_with_dataframes(self, df1, df2):
         """
-        使用两个数据帧验证规则（支持跨文件比较）
+        使用数据帧验证规则（支持单表或跨文件比较）
         
         参数:
             df1: 文件1的数据帧
-            df2: 文件2的数据帧
+            df2: 文件2的数据帧（可选，为None时使用单表比较）
             
         返回:
-            tuple: (passed_rules, failed_rules)
+            tuple: (passed_rules, failed_rules, all_failed_cells, all_passed_cells)
+                - passed_rules: 通过的规则列表
+                - failed_rules: 失败的规则列表
+                - all_failed_cells: 所有失败的单元格列表，格式为[(rule, row_idx, col_idx), ...]
+                - all_passed_cells: 所有通过的单元格列表，格式为[(rule, row_idx, col_idx), ...]
         """
-        logger.info(f"使用数据帧验证规则，df1形状: {df1.shape}, df2形状: {df2.shape}")
+        if df2 is None:
+            logger.info(f"使用单表模式验证规则，df1形状: {df1.shape}")
+        else:
+            logger.info(f"使用双表模式验证规则，df1形状: {df1.shape}, df2形状: {df2.shape}")
         return self.rule_engine.validate_with_dataframes(df1, df2)
     
     def compare_with_rules(self, alias1, sheet_name1, alias2=None, sheet_name2=None):
