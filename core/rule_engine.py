@@ -5,13 +5,6 @@ import re
 import pandas as pd
 import logging
 
-# 配置日志记录
-logging.basicConfig(level=logging.DEBUG, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        logging.FileHandler("app.log"),
-                        logging.StreamHandler()
-                    ])
 logger = logging.getLogger(__name__)
 
 class RuleEngine:
@@ -244,7 +237,25 @@ class RuleEngine:
                 # 执行运算（支持标量和Series运算）
                 op_func = self.operators[token][1]
                 logger.debug(f"evaluate_expression - 执行运算: {a} {token} {b}")
-                result = op_func(a, b)
+                
+                # 特殊处理除法操作，避免除以0的情况
+                if token == '/' or token == '//':
+                    # 对于标量除法
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                        if b == 0:
+                            logger.warning(f"evaluate_expression - 除法操作：除数为0，返回0")
+                            result = 0.0
+                        else:
+                            result = op_func(a, b)
+                    # 对于Series除法
+                    elif isinstance(a, pd.Series) and isinstance(b, pd.Series):
+                        # 使用where条件避免除以0，除以0的情况返回0
+                        result = op_func(a, b.where(b != 0, 1)).where(b != 0, 0)
+                    # 混合类型除法
+                    else:
+                        result = op_func(a, b)
+                else:
+                    result = op_func(a, b)
                 logger.debug(f"evaluate_expression - 运算结果: {result} (类型: {type(result)})")
                 
                 stack.append(result)

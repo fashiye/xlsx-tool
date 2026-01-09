@@ -43,14 +43,28 @@ def 选择索引转Excel范围(indexes):
     if not indexes:
         return ""
     
-    # 检查是否是整列选择（所有行都被选中）
+    # 获取选择的行列信息
     rows = [idx.row() for idx in indexes]
     cols = [idx.column() for idx in indexes]
     
-    # 如果所有索引的列相同，但行不同，则认为是整列选择
-    if len(set(cols)) == 1:
-        return 列索引转字母(cols[0])
+    # 如果所有索引都来自同一个单元格
+    if len(set(zip(rows, cols))) == 1:
+        return f"{列索引转字母(cols[0])}{rows[0]+1}"
     
+    # 检查是否是整列选择（所有行都被选中）
+    # 注意：这里的整列选择需要满足所有索引来自同一列
+    if len(set(cols)) == 1:
+        # 获取选择的行范围
+        min_row = min(rows)
+        max_row = max(rows)
+        selected_rows_count = max_row - min_row + 1
+        
+        # 如果选择的所有索引都来自同一列，并且选择了至少3行连续数据，就认为是整列选择
+        # 这适用于大多数用户点击列标题进行整列选择的情况
+        if selected_rows_count >= 3:
+            return 列索引转字母(cols[0])
+    
+    # 处理常规的单元格范围选择
     start_row = min(rows)
     end_row = max(rows)
     start_col = min(cols)
@@ -248,7 +262,7 @@ class ComparisonTool(QMainWindow):
         # 文件1表格视图
         self.file1_table = QTableView()
         self.file1_table.setSelectionMode(self.file1_table.ExtendedSelection)
-        self.file1_table.setSelectionBehavior(self.file1_table.SelectColumns)
+        self.file1_table.setSelectionBehavior(self.file1_table.SelectItems)
         file1_layout.addWidget(self.file1_table)
         
         content_layout.addWidget(file1_panel, 1)
@@ -278,7 +292,7 @@ class ComparisonTool(QMainWindow):
         # 文件2表格视图
         self.file2_table = QTableView()
         self.file2_table.setSelectionMode(self.file2_table.ExtendedSelection)
-        self.file2_table.setSelectionBehavior(self.file2_table.SelectColumns)
+        self.file2_table.setSelectionBehavior(self.file2_table.SelectItems)
         file2_layout.addWidget(self.file2_table)
         
         content_layout.addWidget(file2_panel, 1)

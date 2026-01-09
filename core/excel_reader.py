@@ -4,13 +4,6 @@ Excel 读取器：使用 pandas.read_excel 读取所有 sheets
 import pandas as pd
 import logging
 
-# 配置日志记录
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        logging.FileHandler("app.log"),
-                        logging.StreamHandler()
-                    ])
 logger = logging.getLogger(__name__)
 
 def load_workbook_all_sheets(filepath):

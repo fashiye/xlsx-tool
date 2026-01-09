@@ -7,13 +7,6 @@ import re
 import textdistance
 import logging
 
-# 配置日志记录
-logging.basicConfig(level=logging.INFO, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        logging.FileHandler("app.log"),
-                        logging.StreamHandler()
-                    ])
 logger = logging.getLogger(__name__)
 
 class StringComparator:
