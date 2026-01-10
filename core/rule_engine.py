@@ -109,24 +109,18 @@ class RuleEngine:
             # 解析FILE1:或FILE2:前缀的单元格或列引用
             elif i + 6 <= n and expr[i:i+6] == 'FILE1:':
                 j = i + 6
-                # 提取单元格或列引用
+                # 提取单元格或列引用，支持工作表引用（如SHEET1:A或Sheet2:A1）
                 while j < n and (expr[j].isalpha() or expr[j].isdigit() or expr[j] == ':'):
                     j += 1
                 token = expr[i:j]
-                # 检查是否是复杂范围引用（超过一个冒号）
-                if token.count(':') > 1:
-                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格或列引用）")
                 tokens.append(token)  # 包括FILE1:前缀
                 i = j
             elif i + 6 <= n and expr[i:i+6] == 'FILE2:':
                 j = i + 6
-                # 提取单元格或列引用
+                # 提取单元格或列引用，支持工作表引用（如SHEET1:A或Sheet2:A1）
                 while j < n and (expr[j].isalpha() or expr[j].isdigit() or expr[j] == ':'):
                     j += 1
                 token = expr[i:j]
-                # 检查是否是复杂范围引用（超过一个冒号）
-                if token.count(':') > 1:
-                    raise ValueError(f"不支持的范围引用：{token}（请使用单个单元格或列引用）")
                 tokens.append(token)  # 包括FILE2:前缀
                 i = j
             # 解析普通单元格或列引用（如A1或A）
@@ -209,8 +203,8 @@ class RuleEngine:
             float 或 pd.Series: 表达式的值（标量）或列数据（Series）
         """
         logger.debug(f"evaluate_expression - 输入表达式: {expr}")
-        logger.debug(f"evaluate_expression - df1类型: {type(df1)}, df1形状: {df1.shape}")
-        logger.debug(f"evaluate_expression - df2类型: {type(df2)}, df2形状: {df2.shape if df2 is not None else 'None'}")
+        logger.debug(f"evaluate_expression - df1类型: {type(df1)}, df1形状: {df1.shape if hasattr(df1, 'shape') else '字典(多工作表)'}")
+        logger.debug(f"evaluate_expression - df2类型: {type(df2)}, df2形状: {df2.shape if df2 is not None and hasattr(df2, 'shape') else 'None或字典'}")
         
         rpn = self.parse_expression(expr)
         logger.debug(f"evaluate_expression - 解析后的RPN表达式: {rpn}")
@@ -263,26 +257,40 @@ class RuleEngine:
                 # 单元格引用或列引用：获取值
                 logger.debug(f"evaluate_expression - 单元格/列引用标记: {token}")
                 
-                if token.startswith('FILE1:'):
-                    # FILE1前缀，使用df1
-                    cell_ref = token[6:]
-                    cell_value = self.get_cell_value(cell_ref, df1)
-                    logger.debug(f"evaluate_expression - FILE1引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
-                elif token.startswith('FILE2:'):
-                    # FILE2前缀，使用df2
-                    if df2 is None:
-                        # 单表比较时，FILE2:也使用df1
-                        logger.warning(f"evaluate_expression - df2参数不存在，FILE2:前缀的引用将使用df1")
-                        cell_ref = token[6:]
-                        cell_value = self.get_cell_value(cell_ref, df1)
+                if token.startswith('FILE1:') or token.startswith('FILE2:'):
+                    # 解析文件前缀和引用
+                    file_prefix = token[:6]
+                    ref_part = token[6:]
+                    
+                    # 解析工作表引用和单元格/列引用（格式：SHEET1:A1 或 Sheet2:A）
+                    if ':' in ref_part:
+                        sheet_name, cell_ref = ref_part.split(':', 1)
+                        logger.debug(f"evaluate_expression - 解析工作表引用: 文件={file_prefix}, 工作表={sheet_name}, 引用={cell_ref}")
                     else:
-                        cell_ref = token[6:]
-                        cell_value = self.get_cell_value(cell_ref, df2)
-                    logger.debug(f"evaluate_expression - FILE2引用: {cell_ref} = {cell_value} (类型: {type(cell_value)})")
+                        sheet_name = None  # 默认为当前工作表
+                        cell_ref = ref_part
+                        logger.debug(f"evaluate_expression - 解析普通引用: 文件={file_prefix}, 引用={cell_ref}")
+                    
+                    # 选择相应的数据帧
+                    if file_prefix == 'FILE1:' or (file_prefix == 'FILE2:' and df2 is None):
+                        # 使用df1（可能包含多个工作表）
+                        cell_value = self.get_cell_value(cell_ref, df1, sheet_name)
+                        logger.debug(f"evaluate_expression - {file_prefix}引用: {ref_part} = {cell_value} (类型: {type(cell_value)})")
+                    else:
+                        # 使用df2（可能包含多个工作表）
+                        cell_value = self.get_cell_value(cell_ref, df2, sheet_name)
+                        logger.debug(f"evaluate_expression - {file_prefix}引用: {ref_part} = {cell_value} (类型: {type(cell_value)})")
                 else:
                     # 默认使用df1
-                    cell_value = self.get_cell_value(token, df1)
-                    logger.debug(f"evaluate_expression - 默认引用: {token} = {cell_value} (类型: {type(cell_value)})")
+                    # 解析工作表引用（格式：SHEET1:A1 或 Sheet2:A）
+                    if ':' in token:
+                        sheet_name, cell_ref = token.split(':', 1)
+                        cell_value = self.get_cell_value(cell_ref, df1, sheet_name)
+                        logger.debug(f"evaluate_expression - 默认引用: {token} = {cell_value} (类型: {type(cell_value)})")
+                    else:
+                        # 普通引用（无工作表指定）
+                        cell_value = self.get_cell_value(token, df1)
+                        logger.debug(f"evaluate_expression - 默认引用: {token} = {cell_value} (类型: {type(cell_value)})")
                 
                 stack.append(cell_value)
             else:
@@ -300,17 +308,30 @@ class RuleEngine:
         
         return final_result
     
-    def get_cell_value(self, cell_ref, df):
+    def get_cell_value(self, cell_ref, df, sheet_name=None):
         """
-        从数据帧中获取单元格值或列数据
-        
+        从数据帧中获取单元格值或列数据，支持指定工作表
+
         参数:
             cell_ref: 单元格引用（如 "A1"）或列引用（如 "A"）
-            df: 数据帧
-            
+            df: 数据帧或包含多个工作表的字典（键为工作表名称，值为数据帧）
+            sheet_name: 工作表名称（可选，当df为字典时使用）
+
         返回:
             float 或 pd.Series: 单元格的值（标量）或列数据（Series）
         """
+        # 处理包含多个工作表的情况
+        if isinstance(df, dict):
+            if sheet_name is None:
+                # 默认使用第一个工作表
+                sheet_name = next(iter(df.keys()))
+                logger.warning(f"未指定工作表名称，使用默认工作表: {sheet_name}")
+            elif sheet_name not in df:
+                raise ValueError(f"工作表 {sheet_name} 不存在")
+            
+            # 获取指定工作表的数据帧
+            df = df[sheet_name]
+            logger.debug(f"切换到工作表: {sheet_name}")
         # 解析单元格引用（如A1）
         cell_match = re.match(r'^([A-Za-z]+)(\d+)$', cell_ref)
         if cell_match:
@@ -421,13 +442,13 @@ class RuleEngine:
         """
         logger.info(f"验证规则: {rule}")
         try:
-            # 确保df1是DataFrame类型
-            if not hasattr(df1, 'iloc'):
-                logger.error(f"参数df1不是DataFrame类型: {type(df1)}")
+            # 确保df1是DataFrame类型或包含DataFrame的字典
+            if not (hasattr(df1, 'iloc') or isinstance(df1, dict)):
+                logger.error(f"参数df1不是DataFrame类型或字典: {type(df1)}")
                 return False, [], []
-            # df2可以是None（单表比较），如果不是None则必须是DataFrame类型
-            if df2 is not None and not hasattr(df2, 'iloc'):
-                logger.error(f"参数df2不是DataFrame类型: {type(df2)}")
+            # df2可以是None（单表比较），如果不是None则必须是DataFrame类型或包含DataFrame的字典
+            if df2 is not None and not (hasattr(df2, 'iloc') or isinstance(df2, dict)):
+                logger.error(f"参数df2不是DataFrame类型或字典: {type(df2)}")
                 return False, [], []
             
             # 单表比较时，确保规则中的FILE1:和FILE2:都使用df1
@@ -493,9 +514,35 @@ class RuleEngine:
                 result_col_idx -= 1
                 
                 # 检查结果列索引是否在范围内
-                if result_col_idx < 0 or result_col_idx >= df1.shape[1]:
-                    logger.error(f"结果列索引超出范围: {right_col_ref} (索引: {result_col_idx})")
-                    return False, [], []
+                if isinstance(df1, dict):
+                    # 对于多工作表字典，需要确定要使用的工作表进行验证
+                    # 尝试从右侧表达式中提取工作表名称
+                    sheet_name = None
+                    if ':' in right_expr:
+                        # 从右侧表达式中提取工作表名称
+                        match = re.match(r'FILE1:([A-Za-z0-9]+):', right_expr)
+                        if match:
+                            sheet_name = match.group(1)
+                    
+                    # 如果右侧没有工作表引用，尝试从左侧提取
+                    if not sheet_name and ':' in left_expr:
+                        match = re.match(r'FILE1:([A-Za-z0-9]+):', left_expr)
+                        if match:
+                            sheet_name = match.group(1)
+                    
+                    # 如果还是没有找到，使用第一个工作表
+                    if not sheet_name:
+                        sheet_name = next(iter(df1.keys()))
+                    
+                    # 检查列索引是否在范围内
+                    if result_col_idx < 0 or result_col_idx >= df1[sheet_name].shape[1]:
+                        logger.error(f"结果列索引超出范围: {right_col_ref} (索引: {result_col_idx})")
+                        return False, [], []
+                else:
+                    # 对于单工作表DataFrame，直接检查
+                    if result_col_idx < 0 or result_col_idx >= df1.shape[1]:
+                        logger.error(f"结果列索引超出范围: {right_col_ref} (索引: {result_col_idx})")
+                        return False, [], []
                 
                 # 执行逐行比较
                 for i in range(len(left_value)):

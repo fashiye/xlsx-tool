@@ -325,8 +325,25 @@ class ExcelComparator:
             passed_fill = PatternFill(start_color='ADD8E6', end_color='ADD8E6', fill_type='solid')  # 蓝色
             failed_fill = PatternFill(start_color='FFCCCB', end_color='FFCCCB', fill_type='solid')  # 红色
             
+            # 复制数据框以避免修改原数据
+            export_df = df.copy()
+            
+            # 创建一个字典来记录每行的状态
+            row_status = {}
+            for row in range(len(export_df)):
+                row_status[row] = "通过"
+            
+            # 标记失败的行
+            if failed_cells:
+                for row_idx, _ in failed_cells:
+                    if row_idx in row_status:
+                        row_status[row_idx] = "失败"
+            
+            # 添加"验证结果"列
+            export_df['验证结果'] = [row_status.get(i, "通过") for i in range(len(export_df))]
+            
             # 将DataFrame数据写入工作表
-            for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+            for r_idx, row in enumerate(dataframe_to_rows(export_df, index=False, header=True), 1):
                 ws.append(row)
             
             # 标记失败的单元格
@@ -382,11 +399,11 @@ class ExcelComparator:
     def validate_with_dataframes(self, df1, df2):
         """
         使用数据帧验证规则（支持单表或跨文件比较）
-        
+
         参数:
-            df1: 文件1的数据帧
-            df2: 文件2的数据帧（可选，为None时使用单表比较）
-            
+            df1: 文件1的数据帧或包含多个工作表的字典
+            df2: 文件2的数据帧或包含多个工作表的字典（可选，为None时使用单表比较）
+
         返回:
             tuple: (passed_rules, failed_rules, all_failed_cells, all_passed_cells)
                 - passed_rules: 通过的规则列表
@@ -395,9 +412,19 @@ class ExcelComparator:
                 - all_passed_cells: 所有通过的单元格列表，格式为[(rule, row_idx, col_idx), ...]
         """
         if df2 is None:
-            logger.info(f"使用单表模式验证规则，df1形状: {df1.shape}")
+            if isinstance(df1, dict):
+                logger.info(f"使用单表模式验证规则，df1包含 {len(df1)} 个工作表: {list(df1.keys())}")
+            else:
+                logger.info(f"使用单表模式验证规则，df1形状: {df1.shape}")
         else:
-            logger.info(f"使用双表模式验证规则，df1形状: {df1.shape}, df2形状: {df2.shape}")
+            if isinstance(df1, dict) and isinstance(df2, dict):
+                logger.info(f"使用双表模式验证规则，df1包含 {len(df1)} 个工作表, df2包含 {len(df2)} 个工作表")
+            elif isinstance(df1, dict):
+                logger.info(f"使用双表模式验证规则，df1包含 {len(df1)} 个工作表, df2形状: {df2.shape}")
+            elif isinstance(df2, dict):
+                logger.info(f"使用双表模式验证规则，df1形状: {df1.shape}, df2包含 {len(df2)} 个工作表")
+            else:
+                logger.info(f"使用双表模式验证规则，df1形状: {df1.shape}, df2形状: {df2.shape}")
         return self.rule_engine.validate_with_dataframes(df1, df2)
     
     def compare_with_rules(self, alias1, sheet_name1, alias2=None, sheet_name2=None):

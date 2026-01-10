@@ -29,8 +29,8 @@ class ComparisonService:
         self.rules = []  # 存储用户定义的比较规则，每个元素是一个字典 {'rule': '规则文本', 'comment': '备注'}
         
         # 数据存储
-        self.file1_df = None  # 文件1的数据框
-        self.file2_df = None  # 文件2的数据框
+        self.file1_df = {}  # 文件1的所有工作表，格式：{sheet_name: DataFrame}
+        self.file2_df = {}  # 文件2的所有工作表，格式：{sheet_name: DataFrame}
         self.result_df = None  # 比较结果的数据框
         self.result_map = None  # 结果状态映射 {(行,列): 'equal'/'diff'}
     
@@ -75,11 +75,11 @@ class ComparisonService:
         logger.info(f"加载工作表数据: 工作簿={alias}，工作表={sheet_name}")
         df = self.comparator.get_sheet_dataframe(alias, sheet_name)
         
-        # 保存到对应的文件数据框
+        # 保存到对应的文件数据框字典
         if alias == "file1":
-            self.file1_df = df
+            self.file1_df[sheet_name] = df
         elif alias == "file2":
-            self.file2_df = df
+            self.file2_df[sheet_name] = df
         
         return df
     
@@ -178,13 +178,24 @@ class ComparisonService:
         # 检查数据框是否可用
         if use_rules and self.rules:
             # 规则比较可以使用单表或双表
-            if self.file1_df is None or self.file1_df.empty:
+            if not self.file1_df:
                 logger.warning("比较失败：未选择文件")
+                raise Exception("请先选择至少一个文件进行比较")
+            # 检查是否有任何工作表数据
+            has_data = any(not df.empty for df in self.file1_df.values())
+            if not has_data:
+                logger.warning("比较失败：文件1没有可用数据")
                 raise Exception("请先选择至少一个文件进行比较")
         else:
             # 直接比较需要两个文件
-            if self.file1_df is None or self.file2_df is None or self.file1_df.empty or self.file2_df.empty:
+            if not self.file1_df or not self.file2_df:
                 logger.warning("比较失败：未选择两个文件")
+                raise Exception("请先选择两个文件进行比较")
+            # 检查是否有任何工作表数据
+            has_file1_data = any(not df.empty for df in self.file1_df.values())
+            has_file2_data = any(not df.empty for df in self.file2_df.values())
+            if not has_file1_data or not has_file2_data:
+                logger.warning("比较失败：其中一个文件没有可用数据")
                 raise Exception("请先选择两个文件进行比较")
         
         result_text = ""
@@ -204,13 +215,19 @@ class ComparisonService:
                 self.comparator.add_rule(rule_dict['rule'])
             
             # 验证所有规则
-            # 如果file2_df不存在或为空，则使用单表比较（将None作为df2参数）
-            if self.file2_df is None or self.file2_df.empty:
+            # 如果file2_df不存在、为空或没有可用数据，则使用单表比较（将None作为df2参数）
+            if not self.file2_df:
                 logger.info("使用单表比较模式进行规则验证")
                 passed_rules, failed_rules, all_failed_cells, all_passed_cells = self.comparator.validate_with_dataframes(self.file1_df, None)
             else:
-                logger.info("使用双表比较模式进行规则验证")
-                passed_rules, failed_rules, all_failed_cells, all_passed_cells = self.comparator.validate_with_dataframes(self.file1_df, self.file2_df)
+                # 检查file2_df是否有可用数据
+                has_file2_data = any(not df.empty for df in self.file2_df.values())
+                if not has_file2_data:
+                    logger.info("文件2没有可用数据，使用单表比较模式进行规则验证")
+                    passed_rules, failed_rules, all_failed_cells, all_passed_cells = self.comparator.validate_with_dataframes(self.file1_df, None)
+                else:
+                    logger.info("使用双表比较模式进行规则验证")
+                    passed_rules, failed_rules, all_failed_cells, all_passed_cells = self.comparator.validate_with_dataframes(self.file1_df, self.file2_df)
             
             # 生成规则比较结果
             result_text = f"规则比较结果：\n"
@@ -230,12 +247,60 @@ class ComparisonService:
                     result_text += f"  ✗ {rule}\n"
                 result_text += "\n"
             
-            # 为规则比较结果创建DataFrame
+            # 为规则比较结果创建DataFrame，包含详细的行通过数据
             rules_data = []
+            
+            # 处理通过的规则
             for rule in passed_rules:
-                rules_data.append({'规则': rule, '状态': '通过'})
+                # 获取该规则对应的通过单元格
+                rule_passed_cells = [cell for cell in all_passed_cells if cell[0] == rule]
+                
+                # 收集通过的行号
+                passed_rows = set()
+                for cell in rule_passed_cells:
+                    if len(cell) == 3:  # 格式：(rule, row_idx, col_idx)
+                        # 转换为Excel行号：索引+2（+1用于从0开始到从1开始的转换，+1用于跳过header行）
+                        passed_rows.add(cell[1] + 2)
+                    elif len(cell) == 2:  # 格式：(row_idx, col_idx)
+                        passed_rows.add(cell[0] + 2)
+                
+                # 生成通过行号的字符串表示
+                if passed_rows:
+                    passed_rows_str = ', '.join(map(str, sorted(passed_rows)))
+                else:
+                    passed_rows_str = '所有行'
+                
+                rules_data.append({
+                    '规则': rule,
+                    '状态': '通过',
+                    '详细信息': f'通过行: {passed_rows_str}'
+                })
+            
+            # 处理失败的规则
             for rule in failed_rules:
-                rules_data.append({'规则': rule, '状态': '失败'})
+                # 获取该规则对应的失败单元格
+                rule_failed_cells = [cell for cell in all_failed_cells if cell[0] == rule]
+                
+                # 收集失败的行号
+                failed_rows = set()
+                for cell in rule_failed_cells:
+                    if len(cell) == 3:  # 格式：(rule, row_idx, col_idx)
+                        # 转换为Excel行号：索引+2（+1用于从0开始到从1开始的转换，+1用于跳过header行）
+                        failed_rows.add(cell[1] + 2)
+                    elif len(cell) == 2:  # 格式：(row_idx, col_idx)
+                        failed_rows.add(cell[0] + 2)
+                
+                # 生成失败行号的字符串表示
+                if failed_rows:
+                    failed_rows_str = ', '.join(map(str, sorted(failed_rows)))
+                else:
+                    failed_rows_str = '无'
+                
+                rules_data.append({
+                    '规则': rule,
+                    '状态': '失败',
+                    '详细信息': f'失败行: {failed_rows_str}'
+                })
             
             result_df = pd.DataFrame(rules_data)
             

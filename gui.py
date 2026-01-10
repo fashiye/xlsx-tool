@@ -458,8 +458,11 @@ class ComparisonTool(QMainWindow):
             
         range_str = 选择索引转Excel范围(selected_indexes)
         if range_str:
+            # 获取当前选择的工作表名称
+            sheet_name = self.file1_sheet_input.currentText()
             current_text = self.rule_input.text()
-            new_text = current_text + f" FILE1:{range_str}" if current_text else f"FILE1:{range_str}"
+            # 格式化为 FILE1:SheetName:range_str
+            new_text = current_text + f" FILE1:{sheet_name}:{range_str}" if current_text else f"FILE1:{sheet_name}:{range_str}"
             self.rule_input.setText(new_text)
     
     def update_file2_selection(self, selected, deselected):
@@ -473,8 +476,11 @@ class ComparisonTool(QMainWindow):
             
         range_str = 选择索引转Excel范围(selected_indexes)
         if range_str:
+            # 获取当前选择的工作表名称
+            sheet_name = self.file2_sheet_input.currentText()
             current_text = self.rule_input.text()
-            new_text = current_text + f" FILE2:{range_str}" if current_text else f"FILE2:{range_str}"
+            # 格式化为 FILE2:SheetName:range_str
+            new_text = current_text + f" FILE2:{sheet_name}:{range_str}" if current_text else f"FILE2:{sheet_name}:{range_str}"
             self.rule_input.setText(new_text)
     
     def add_rule(self):
